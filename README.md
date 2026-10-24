@@ -13,9 +13,11 @@ plugin, and chaos experiments.
 
 ## Status
 
-Phase 2: logs and traces. `docker compose up` replays the cached 2023 Qatar
-GP and sends live metrics, logs and traces to Grafana Cloud, with lap traces
-linked to the pit stop and race control log lines that happen around them.
+Phase 3: dashboards. `docker compose up` replays the cached 2023 Qatar GP
+and sends live metrics, logs and traces to Grafana Cloud; import the
+dashboards in [`dashboards/`](dashboards/) to watch it as a pit wall, a
+driver deep dive, and the replay's own self-observability. SLOs and alerting
+are still to come.
 
 ## Project layout
 

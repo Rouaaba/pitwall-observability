@@ -1,0 +1,255 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Grafana Cloud Prometheus/Mimir datasource receiving pitwall_* metrics",
+      "type": "datasource",
+      "pluginId": "prometheus"
+    },
+    {
+      "name": "DS_LOKI",
+      "label": "Loki",
+      "description": "Grafana Cloud Loki datasource receiving pitwall-replay logs",
+      "type": "datasource",
+      "pluginId": "loki"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.4.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
+    { "type": "datasource", "id": "loki", "name": "Loki", "version": "1.0.0" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "state-timeline", "name": "State timeline", "version": "" },
+    { "type": "panel", "id": "heatmap", "name": "Heatmap", "version": "" },
+    { "type": "panel", "id": "logs", "name": "Logs", "version": "" }
+  ],
+  "title": "Pitwall: Race Overview",
+  "description": "Live race overview for the pitwall-observability replay: positions, gaps, tyre strategy, lap time distribution and race control messages.",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "5s",
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "utc",
+  "tags": ["pitwall", "f1", "race-overview"],
+  "templating": {
+    "list": [
+      {
+        "name": "driver",
+        "type": "query",
+        "label": "Driver",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(pitwall_position, driver)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "Race Control",
+        "enable": true,
+        "iconColor": "red",
+        "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+        "target": {
+          "expr": "{service_name=\"pitwall-replay\"} | logfmt | category=\"RACE_CONTROL\" or category=\"RaceControl\""
+        },
+        "titleFormat": "{{flag}}",
+        "textFormat": "{{message}}",
+        "tagKeys": "flag,category"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Positions",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "pitwall_position{driver=~\"$driver\"}",
+          "legendFormat": "{{driver}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "axisInverted": true,
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "drawStyle": "line",
+            "pointSize": 4,
+            "showPoints": "never"
+          },
+          "min": 1,
+          "max": 20
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "description": "P1 at the top. If axisInverted isn't supported by your Grafana version, override Standard options Min=20.5/Max=0.5 instead."
+    },
+    {
+      "id": 2,
+      "title": "Gap to Leader",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "pitwall_gap_to_leader_seconds{driver=~\"$driver\"}",
+          "legendFormat": "{{driver}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 2, "fillOpacity": 5, "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Tyre Strategy",
+      "type": "state-timeline",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 9 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "description": "Built from stint_start log events (driver, compound, lap_start, lap_end) rather than the tyre_age gauge, so each stint renders as a clean, gap-free block for its full duration.",
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+          "expr": "{service_name=\"pitwall-replay\"} | logfmt | __error__=\"\" | driver!=\"\" and compound!=\"\" | line_format \"{{.driver}}\"",
+          "queryType": "range"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": { "source": "labels", "format": "auto" }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {},
+            "excludeByName": { "Line": true, "id": true, "tsNs": true }
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "driver": { "aggregations": [], "operation": "groupby" },
+              "compound": { "aggregations": [], "operation": "groupby" },
+              "Time": { "aggregations": [], "operation": "groupby" }
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 0,
+            "fillOpacity": 90
+          },
+          "mappings": [
+            { "type": "value", "options": { "SOFT": { "color": "red", "index": 0 } } },
+            { "type": "value", "options": { "MEDIUM": { "color": "yellow", "index": 1 } } },
+            { "type": "value", "options": { "HARD": { "color": "white", "index": 2 } } },
+            { "type": "value", "options": { "INTERMEDIATE": { "color": "green", "index": 3 } } },
+            { "type": "value", "options": { "WET": { "color": "blue", "index": 4 } } }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "always",
+        "rowHeight": 0.8
+      }
+    },
+    {
+      "id": 4,
+      "title": "Lap Time Distribution",
+      "type": "heatmap",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Native Prometheus classic histogram. If Grafana Cloud is receiving this as an OTel native histogram instead, switch the query to the raw metric name and set the panel's histogram format to 'Native'.",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (le) (increase(pitwall_lap_time_distribution_seconds_bucket{driver=~\"$driver\"}[$__interval]))",
+          "format": "heatmap",
+          "legendFormat": "{{le}}"
+        }
+      ],
+      "options": {
+        "calculate": false,
+        "yAxis": { "unit": "s", "decimals": 0 },
+        "color": { "scheme": "Spectral", "mode": "scheme" }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Race Control",
+      "type": "logs",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 18 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+          "expr": "{service_name=\"pitwall-replay\"} | logfmt | category=\"RACE_CONTROL\" or category=\"RaceControl\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 6,
+      "title": "Pit Stops",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 27 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "pitwall_pit_stops_total{driver=~\"$driver\"}",
+          "legendFormat": "{{driver}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 1 }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] }
+      }
+    }
+  ]
+}
