@@ -74,7 +74,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "pitwall_position{driver=~\"$driver\"}",
+          "expr": "max by (driver) (pitwall_position{driver=~\"$driver\"})",
           "legendFormat": "{{driver}}"
         }
       ],
@@ -111,7 +111,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "pitwall_gap_to_leader_seconds{driver=~\"$driver\"}",
+          "expr": "max by (driver) (pitwall_gap_to_leader_seconds{driver=~\"$driver\"})",
           "legendFormat": "{{driver}}"
         }
       ],
@@ -235,7 +235,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "pitwall_pit_stops_total{driver=~\"$driver\"}",
+          "expr": "max by (driver) (pitwall_pit_stops_total{driver=~\"$driver\"})",
           "legendFormat": "{{driver}}"
         }
       ],

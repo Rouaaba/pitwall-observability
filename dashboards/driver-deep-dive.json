@@ -64,19 +64,19 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "pitwall_car_speed_kph{driver=\"$driver\"}",
+          "expr": "max(pitwall_car_speed_kph{driver=\"$driver\"})",
           "legendFormat": "Speed (km/h)",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "pitwall_car_throttle_pct{driver=\"$driver\"}",
+          "expr": "max(pitwall_car_throttle_pct{driver=\"$driver\"})",
           "legendFormat": "Throttle (%)",
           "refId": "B"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "pitwall_car_brake_pct{driver=\"$driver\"}",
+          "expr": "max(pitwall_car_brake_pct{driver=\"$driver\"})",
           "legendFormat": "Brake (%)",
           "refId": "C"
         }
@@ -149,7 +149,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "pitwall_lap_time_seconds{driver=\"$driver\"}",
+          "expr": "max(pitwall_lap_time_seconds{driver=\"$driver\"})",
           "legendFormat": "Lap time"
         }
       ],
