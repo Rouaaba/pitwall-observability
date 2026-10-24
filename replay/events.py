@@ -18,6 +18,7 @@ class EventKind(Enum):
     POSITION = auto()
     CAR_DATA = auto()
     LOCATION = auto()
+    TEAM_RADIO = auto()
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +109,9 @@ def iter_endpoint_events(session_dir: Path) -> list[Iterator[Event]]:
         ),
         _events_from_records(
             _load_json(session_dir / "position.json"), EventKind.POSITION, "date"
+        ),
+        _events_from_records(
+            _load_json(session_dir / "team_radio.json"), EventKind.TEAM_RADIO, "date"
         ),
     ]
 

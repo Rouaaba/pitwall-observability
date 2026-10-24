@@ -13,13 +13,15 @@ from .clock import ReplayClock
 from .driver_labels import load_driver_labels
 from .engine import ReplayEngine
 from .events import build_event_stream, get_race_start
+from .logs import build_logger_provider, create_logs
 from .metrics import build_meter_provider, create_metrics
+from .traces import build_tracer_provider, create_traces
 
 VERSION = "0.1.0"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Replay a cached race as live OTel metrics.")
+    parser = argparse.ArgumentParser(description="Replay a cached race as live OTel telemetry.")
     parser.add_argument(
         "--session-key",
         type=int,
@@ -61,34 +63,53 @@ def main(argv: list[str] | None = None) -> None:
     race_start = get_race_start(session_dir)
     driver_labels = load_driver_labels(session_dir)
 
-    provider = build_meter_provider(
+    meter_provider = build_meter_provider(
         otlp_endpoint=args.otlp_endpoint,
         export_interval_seconds=args.export_interval_seconds,
         session_key=args.session_key,
     )
-    metrics = create_metrics(provider)
+    metrics = create_metrics(meter_provider)
     metrics.set_build_info(VERSION, args.session_key, args.speed)
 
+    tracer_provider = build_tracer_provider(args.otlp_endpoint, args.session_key)
+    traces = create_traces(tracer_provider)
+
+    logger_provider = build_logger_provider(args.otlp_endpoint, args.session_key)
+    logs = create_logs(logger_provider)
+
     clock = ReplayClock(race_start=race_start, speed=args.speed)
-    engine = ReplayEngine(clock=clock, metrics=metrics, driver_labels=driver_labels)
+    engine = ReplayEngine(
+        clock=clock, metrics=metrics, traces=traces, logs=logs, driver_labels=driver_labels
+    )
 
     logging.info(
         "Replaying session_key=%s at %sx (race_start=%s, otlp_endpoint=%s)",
         args.session_key, args.speed, race_start, args.otlp_endpoint,
     )
 
-    def shutdown(signum, frame):
-        logging.info("Shutting down, flushing metrics...")
-        provider.shutdown()
+    shutdown_done = False
+
+    def shutdown_providers() -> None:
+        nonlocal shutdown_done
+        if shutdown_done:
+            return
+        shutdown_done = True
+        logging.info("Shutting down, flushing telemetry...")
+        meter_provider.shutdown()
+        tracer_provider.shutdown()
+        logger_provider.shutdown()
+
+    def handle_signal(signum, frame):
+        shutdown_providers()
         sys.exit(0)
 
-    signal.signal(signal.SIGTERM, shutdown)
-    signal.signal(signal.SIGINT, shutdown)
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
 
     try:
         engine.run(build_event_stream(session_dir))
     finally:
-        provider.shutdown()
+        shutdown_providers()
 
     logging.info("Replay complete.")
 

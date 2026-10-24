@@ -19,6 +19,7 @@ ENDPOINTS = [
     "race_control",
     "intervals",
     "position",
+    "team_radio",
 ]
 # OpenF1 rejects session_key-only requests for these high-frequency endpoints
 # (too many rows); they must be fetched one driver at a time.

@@ -13,8 +13,9 @@ plugin, and chaos experiments.
 
 ## Status
 
-Phase 1: replay engine and metrics. `docker compose up` replays the cached
-2023 Qatar GP and sends live metrics to Grafana Cloud.
+Phase 2: logs and traces. `docker compose up` replays the cached 2023 Qatar
+GP and sends live metrics, logs and traces to Grafana Cloud, with lap traces
+linked to the pit stop and race control log lines that happen around them.
 
 ## Project layout
 
@@ -84,6 +85,46 @@ The replay also reports on itself: `pitwall_replay_events_total` (by event
 kind) and `pitwall_replay_lag_seconds` (how far behind schedule it is) are
 sent alongside the race metrics, the same way you'd instrument any
 production service.
+
+## Traces and logs
+
+Each completed lap becomes one trace: a root `lap` span covering the lap's
+real duration, with three back-to-back `sector_1`/`sector_2`/`sector_3` child
+spans built from the sector durations, and a `pit_stop` child span on laps
+with a pit stop. Spans carry `driver`, `team`, `compound`, `tyre_age`,
+`position` and `lap_number` as attributes — lap number is fine on spans,
+since span attributes don't create new metric series the way a label would.
+
+Race control messages, pit stops, stint changes and team radio (just the
+`recording_url` — transcription is a stretch goal) are sent as logs. Only
+`service.name` and `session_key` are Loki labels; driver, flag, lap number
+and compound stay as structured log attributes so label cardinality stays
+flat regardless of race length.
+
+Race control severity: a red flag is `ERROR`, a safety car or yellow flag is
+`WARN`, everything else is `INFO`.
+
+Pit stop and race control log lines carry the `trace_id` of whichever lap
+trace most recently completed for that driver, so a Loki derived field can
+jump straight to the matching Tempo trace. This is a best-effort link, not
+exact forensic lap attribution — a pit stop is logged against the latest
+*completed* lap trace at the moment it's processed, since OpenF1's data
+doesn't let the single-pass replay know in advance which lap a pit stop
+"belongs" to.
+
+Example TraceQL query — every sector 2 slower than 32 seconds on medium
+tyres:
+
+```
+{ name = "sector_2" && duration > 32s && span.compound = "MEDIUM" }
+```
+
+### One-time Grafana Cloud setup
+
+To click from a pit-stop log line to its trace, add a **derived field** on
+the Loki data source in Grafana Cloud: match the `trace_id` log attribute
+and point it at the Tempo data source. This is manual UI configuration (not
+yet in Terraform — that's Phase 4) and only needs doing once per stack.
 
 ### Running outside Docker
 
