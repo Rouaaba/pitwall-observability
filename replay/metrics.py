@@ -73,6 +73,12 @@ class PitwallMetrics:
             "pitwall_car_brake_pct", unit="%", description="Brake position"
         )
         self._car_gear = meter.create_gauge("pitwall_car_gear", description="Current gear")
+        self._car_x = meter.create_gauge(
+            "pitwall_car_x", description="Car X position on track, OpenF1 local coordinates"
+        )
+        self._car_y = meter.create_gauge(
+            "pitwall_car_y", description="Car Y position on track, OpenF1 local coordinates"
+        )
 
         self._replay_events_total = meter.create_counter(
             "pitwall_replay_events_total", description="Replay events processed, by kind"
@@ -123,6 +129,12 @@ class PitwallMetrics:
             self._car_brake.set(brake, attrs)
         if n_gear is not None:
             self._car_gear.set(n_gear, attrs)
+
+    def record_car_position(self, attrs: dict, x: float | None, y: float | None) -> None:
+        if x is not None:
+            self._car_x.set(x, attrs)
+        if y is not None:
+            self._car_y.set(y, attrs)
 
     def record_event_processed(self, kind: str) -> None:
         self._replay_events_total.add(1, {"event_kind": kind})

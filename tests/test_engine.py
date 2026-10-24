@@ -14,6 +14,7 @@ class RecordingMetrics:
         self.lap_times = []
         self.events_processed = []
         self.lags = []
+        self.car_positions = []
 
     def record_lap_time(self, attrs, lap_time_s):
         self.lap_times.append((attrs, lap_time_s))
@@ -41,6 +42,9 @@ class RecordingMetrics:
 
     def record_car_telemetry(self, attrs, speed, throttle, brake, n_gear):
         pass
+
+    def record_car_position(self, attrs, x, y):
+        self.car_positions.append((attrs, x, y))
 
     def record_event_processed(self, kind):
         self.events_processed.append(kind)
@@ -152,14 +156,21 @@ def test_unknown_driver_falls_back_to_driver_number_label():
     assert attrs["driver"] == "99"
 
 
-def test_location_events_are_counted_but_not_metriced():
+def test_location_event_records_car_position():
     engine, metrics, _, _ = make_engine()
     events = [
-        Event(event_time=T0, kind=EventKind.LOCATION, driver_number=1, payload={}),
+        Event(
+            event_time=T0,
+            kind=EventKind.LOCATION,
+            driver_number=1,
+            payload={"x": 100.0, "y": -250.0},
+        ),
     ]
     engine.run(iter(events))
     assert metrics.events_processed == ["LOCATION"]
-    assert metrics.lap_times == []
+    assert metrics.car_positions == [
+        ({"driver": "VER", "team": "Red Bull Racing"}, 100.0, -250.0)
+    ]
 
 
 def test_race_control_event_is_logged():

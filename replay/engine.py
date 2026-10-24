@@ -88,7 +88,7 @@ class ReplayEngine:
         elif event.kind is EventKind.CAR_DATA:
             self._dispatch_car_data(attrs, payload)
         elif event.kind is EventKind.LOCATION:
-            pass  # loaded for stream realism/self-observability only, no metric defined yet
+            self._dispatch_location(attrs, payload)
 
     def _dispatch_lap(self, attrs: dict, payload: dict, driver_number: int | None) -> None:
         lap_duration = payload.get("lap_duration")
@@ -169,3 +169,6 @@ class ReplayEngine:
             brake=payload.get("brake"),
             n_gear=payload.get("n_gear"),
         )
+
+    def _dispatch_location(self, attrs: dict, payload: dict) -> None:
+        self.metrics.record_car_position(attrs, x=payload.get("x"), y=payload.get("y"))
