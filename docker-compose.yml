@@ -1,0 +1,30 @@
+services:
+  alloy:
+    image: grafana/alloy:latest
+    container_name: pitwall-alloy
+    env_file:
+      - .env
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "12345:12345" # Alloy UI
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+
+  replay:
+    build: .
+    container_name: pitwall-replay
+    depends_on:
+      - alloy
+    env_file:
+      - .env
+    environment:
+      OTLP_ENDPOINT: alloy:4317
+      SESSION_KEY: "9221"
+      SPEED: "1"
+    volumes:
+      - ./data:/app/data:ro
