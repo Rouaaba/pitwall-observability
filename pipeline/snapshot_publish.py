@@ -26,6 +26,17 @@ logger = logging.getLogger(__name__)
 
 SNAPSHOT_DIR_NAME = "data/snapshots"
 
+# This project's own repo root -- used as a hard safety guard in
+# commit_and_push so a misconfigured --data-repo/PITWALL_DATA_REPO can never
+# again commit snapshot files into pitwall-observability itself, which
+# happened once when PITWALL_DATA_REPO_PATH (a typo'd env var name the code
+# used to read) silently fell back to a path inside this checkout.
+_THIS_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+class WrongRepoError(Exception):
+    pass
+
 
 def snapshot_path(repo_dir: Path, meeting_key: int) -> Path:
     return repo_dir / SNAPSHOT_DIR_NAME / f"{meeting_key}.json"
@@ -110,6 +121,21 @@ def _year_from_race_start(snapshot: dict) -> int | None:
     return datetime.fromisoformat(race_start).year
 
 
+def _guard_against_this_project_repo(repo_dir: Path) -> None:
+    """Refuses to commit/push if repo_dir resolves inside (or to) this
+    project's own checkout -- the exact mistake that happened once, where a
+    misconfigured data-repo path silently fell back to a path inside
+    pitwall-observability and its commit landed in that repo instead of
+    pitwall-data."""
+    resolved = repo_dir.resolve()
+    if resolved == _THIS_PROJECT_ROOT or _THIS_PROJECT_ROOT in resolved.parents:
+        raise WrongRepoError(
+            f"Refusing to commit/push: --data-repo resolved to {resolved}, "
+            f"which is inside this project's own checkout ({_THIS_PROJECT_ROOT}). "
+            "Set --data-repo or $PITWALL_DATA_REPO to a separate pitwall-data checkout."
+        )
+
+
 def commit_and_push(repo_dir: Path, message: str) -> bool:
     """Commits and pushes whatever's staged, if PITWALL_DATA_REPO-style env
     vars are configured. Returns True if a commit was made. No-ops (and
@@ -123,6 +149,8 @@ def commit_and_push(repo_dir: Path, message: str) -> bool:
             "writing local files only, skipping git publish."
         )
         return False
+
+    _guard_against_this_project_repo(repo_dir)
 
     subprocess.run(["git", "-C", str(repo_dir), "add", "-A"], check=True)
     status = subprocess.run(

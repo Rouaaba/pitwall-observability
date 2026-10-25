@@ -48,8 +48,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--data-repo",
         type=Path,
-        default=Path(os.environ.get("PITWALL_DATA_REPO_PATH", "data")),
-        help="Local checkout to write snapshots into (default: ./data, or $PITWALL_DATA_REPO_PATH)",
+        default=None,
+        help=(
+            "Local checkout of the pitwall-data repo to write snapshots into. "
+            "Falls back to $PITWALL_DATA_REPO if not passed. If neither is set, "
+            "writes to a local-only directory (./pitwall-briefing-output) and "
+            "never attempts to publish -- this deliberately has NO default that "
+            "points inside this project's own repo, since that previously "
+            "caused snapshot files to be committed into pitwall-observability "
+            "by mistake."
+        ),
     )
     parser.add_argument(
         "--otlp-endpoint", default=os.environ.get("OTLP_ENDPOINT", "localhost:4317")
@@ -57,6 +65,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.backfill and args.season is None:
         parser.error("--backfill requires --season")
+
+    if args.data_repo is None:
+        env_repo = os.environ.get("PITWALL_DATA_REPO")
+        args.data_repo = Path(env_repo) if env_repo else Path("pitwall-briefing-output")
+        if not env_repo:
+            logger.warning(
+                "Neither --data-repo nor $PITWALL_DATA_REPO is set; writing local "
+                "files only to %s -- publishing is disabled.",
+                args.data_repo,
+            )
+
     return args
 
 

@@ -1,9 +1,12 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from pipeline.snapshot_publish import (
+    _THIS_PROJECT_ROOT,
+    WrongRepoError,
     commit_and_push,
     index_path,
     latest_path,
@@ -148,3 +151,39 @@ def test_commit_and_push_noop_when_nothing_changed(tmp_path, monkeypatch):
 
     committed = commit_and_push(tmp_path, "no-op commit")
     assert committed is False
+
+
+# ---- safety guard: never publish into this project's own repo ----
+
+
+def test_commit_and_push_refuses_this_projects_own_root(monkeypatch):
+    monkeypatch.setenv("PITWALL_DATA_TOKEN", "fake-token")
+    with pytest.raises(WrongRepoError):
+        commit_and_push(_THIS_PROJECT_ROOT, "should never happen")
+
+
+def test_commit_and_push_refuses_a_subdirectory_of_this_project(monkeypatch):
+    monkeypatch.setenv("PITWALL_DATA_TOKEN", "fake-token")
+    with pytest.raises(WrongRepoError):
+        commit_and_push(_THIS_PROJECT_ROOT / "data", "should never happen")
+
+
+def test_commit_and_push_refuses_relative_path_resolving_inside_project(monkeypatch, tmp_path):
+    monkeypatch.setenv("PITWALL_DATA_TOKEN", "fake-token")
+    monkeypatch.chdir(_THIS_PROJECT_ROOT)
+    # Mirrors the real incident: a relative --data-repo/PITWALL_DATA_REPO
+    # value, resolved from inside this project's own checkout.
+    with pytest.raises(WrongRepoError):
+        commit_and_push(Path("Rouaaba/pitwall-data"), "should never happen")
+
+
+def test_commit_and_push_allows_a_sibling_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("PITWALL_DATA_TOKEN", "fake-token")
+    sibling = tmp_path / "pitwall-data"
+    sibling.mkdir()
+    init_repo(sibling)
+    (sibling / "file.txt").write_text("hello")
+    with pytest.raises(subprocess.CalledProcessError):
+        # Fails at push (no remote configured) -- proves the guard did NOT
+        # block a genuinely separate repo, only ones inside this project.
+        commit_and_push(sibling, "ok commit")
