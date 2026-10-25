@@ -60,6 +60,12 @@ def fetch_and_cache(session_key: int, endpoints: list[str] = ENDPOINTS) -> None:
             params={"session_key": session_key},
             timeout=60,
         )
+        if resp.status_code == 404:
+            # Not every endpoint has data for every session type, e.g.
+            # qualifying/practice sessions have no intervals (no race gaps).
+            print(f"[skip] {endpoint} has no data for session_key={session_key} (404)")
+            out_file.write_text("[]")
+            continue
         resp.raise_for_status()
         data = resp.json()
         out_file.write_text(json.dumps(data, indent=2))
