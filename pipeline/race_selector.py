@@ -41,7 +41,7 @@ class RaceNotFoundError(Exception):
         else:
             lines.append("No races are cached at all.")
         lines.append(
-            f"To fetch it: .venv/bin/python pipeline/fetch_openf1.py "
+            f"To fetch it: .venv/bin/python -m pipeline.fetch_openf1 "
             f"--year {self.season} --meeting \"{self.race.replace('_', ' ').title()}\""
         )
         return "\n".join(lines)

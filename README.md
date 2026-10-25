@@ -1,36 +1,39 @@
 # pitwall-observability
 
-A race, treated like a production system. A replay engine streams a historical
-Formula racing session at any speed and re-times it onto the current clock, so
-it can be demoed any day of the week. Each car is a service, laps are traces,
-sectors are spans, tyre wear is error-budget burn, and race control messages
-are incident annotations.
+A race-weekend companion for the current Formula 1 season, built and run
+like a production system: a near-live ingestion pipeline with SLOs and
+alerting, plus a rehearsal tool that replays last year's race at the same
+circuit through that same pipeline before each real Grand Prix. Each car is
+a service, laps are traces, sectors are spans, tyre wear is error-budget
+burn, and race control messages are incident annotations.
 
-Built in phases on top of a small Python service that replays a past race and
-sends lap metrics to Grafana Cloud via Grafana Alloy (OpenTelemetry). Later
-phases add traces, SLOs, a Kubernetes deployment, a custom Grafana panel
-plugin, and chaos experiments.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full picture:
+the Briefing/Debrief/pipeline/rehearsal parts, the `season`/`race`/`session`
+label convention, and why OpenF1's free-tier rate limit shapes the whole
+cache-once design.
 
 ## Status
 
-Phase 3: dashboards. `docker compose up` replays the cached 2023 Qatar GP
-and sends live metrics, logs and traces to Grafana Cloud; import the
-dashboards in [`dashboards/`](dashboards/) to watch it as a pit wall, a
-driver deep dive, and the replay's own self-observability. SLOs and alerting
-are still to come.
+Phase 3: dashboards, plus a restructure into a shared pipeline. `docker
+compose up` replays the cached 2023 Qatar GP and sends live metrics, logs
+and traces to Grafana Cloud; import the dashboards in
+[`dashboards/`](dashboards/) to watch it as a pit wall, a driver deep dive,
+and the pipeline's own self-observability. Briefing, Debrief, SLOs and
+alerting are still to come.
 
 ## Project layout
 
 ```
 pitwall-observability/
 ├── pipeline/           # Python ingestion pipeline (rehearsal + production use)
-├── tests/              # pytest unit tests (clock, events, engine)
-├── alloy/             # Alloy config
-├── dashboards/        # dashboard JSON
-├── terraform/         # Grafana Cloud as code
-├── deploy/            # Helm charts / k8s manifests
-├── plugins/trackmap/  # Grafana panel plugin
-├── chaos/             # experiments and write-ups
+├── tests/              # pytest unit tests
+├── alloy/              # Alloy config
+├── dashboards/         # dashboard JSON
+├── docs/                # architecture docs
+├── terraform/           # Grafana Cloud as code
+├── deploy/              # Helm charts / k8s manifests
+├── plugins/trackmap/    # Grafana panel plugin
+├── chaos/                # experiments and write-ups
 ├── notebooks/
 ├── Dockerfile
 ├── docker-compose.yml
@@ -61,7 +64,7 @@ pitwall-observability/
    .venv/bin/pip install -r requirements-dev.txt
    ```
 3. Fetch and cache race data (only needed once per session):
-   `.venv/bin/python pipeline/fetch_openf1.py --year 2023 --meeting Qatar`
+   `.venv/bin/python -m pipeline.fetch_openf1 --year 2023 --meeting Qatar`
 4. Explore the data: `.venv/bin/jupyter lab notebooks/`
 
 ## Running the replay

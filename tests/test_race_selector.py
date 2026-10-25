@@ -50,7 +50,7 @@ def test_missing_race_raises_with_cached_list_and_fetch_command(tmp_path):
     assert "season='2024'" in message
     assert "race='monaco'" in message
     assert "qatar" in message  # lists what IS cached
-    assert "fetch_openf1.py" in message
+    assert "pipeline.fetch_openf1" in message
     assert "--year 2024" in message
     assert "Monaco" in message
 
