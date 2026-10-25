@@ -88,14 +88,15 @@ def generate_one_meeting(
     is_latest: bool,
     force: bool,
     metrics=None,
-) -> bool:
-    """Returns True if a snapshot was written (changed or newly created)."""
+) -> list[Path]:
+    """Returns the paths actually written this call (empty if the snapshot
+    was skipped or unchanged)."""
     existing_path = snapshot_path(repo_dir, meeting_key)
     if existing_path.exists() and not force:
         existing = json.loads(existing_path.read_text())
         if existing.get("final"):
             logger.info("[skip] meeting_key=%s already final", meeting_key)
-            return False
+            return []
 
     start = time.monotonic()
     try:
@@ -107,7 +108,7 @@ def generate_one_meeting(
             metrics.record_snapshot_failure(reason=type(exc).__name__)
         raise
 
-    changed = write_snapshot(repo_dir, snapshot, is_latest=is_latest)
+    written = write_snapshot(repo_dir, snapshot, is_latest=is_latest)
     duration = time.monotonic() - start
 
     if metrics is not None:
@@ -117,9 +118,9 @@ def generate_one_meeting(
 
     logger.info(
         "[%s] meeting_key=%s final=%s duration=%.1fs",
-        "changed" if changed else "unchanged", meeting_key, snapshot["final"], duration,
+        "changed" if written else "unchanged", meeting_key, snapshot["final"], duration,
     )
-    return changed
+    return written
 
 
 def run_backfill(
@@ -151,15 +152,16 @@ def run_backfill(
             return
 
     latest_key = resolve_latest_meeting_key(client, now)
+    written: list[Path] = []
     for meeting in race_meetings:
-        generate_one_meeting(
+        written += generate_one_meeting(
             client, repo_dir, meeting["meeting_key"], now,
             is_latest=(meeting["meeting_key"] == latest_key),
             force=force, metrics=metrics,
         )
 
-    rebuild_index(repo_dir, latest_meeting_key=latest_key)
-    commit_and_push(repo_dir, f"Backfill snapshots for season {season}")
+    written += rebuild_index(repo_dir, latest_meeting_key=latest_key)
+    commit_and_push(repo_dir, f"Backfill snapshots for season {season}", written)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -192,13 +194,15 @@ def main(argv: list[str] | None = None) -> None:
             else:
                 meeting_key = int(args.meeting)
             latest_key = resolve_latest_meeting_key(client, now)
-            generate_one_meeting(
+            written = generate_one_meeting(
                 client, args.data_repo, meeting_key, now,
                 is_latest=(meeting_key == latest_key),
                 force=args.force, metrics=metrics,
             )
-            rebuild_index(args.data_repo, latest_meeting_key=latest_key)
-            commit_and_push(args.data_repo, f"Update snapshot for meeting {meeting_key}")
+            written += rebuild_index(args.data_repo, latest_meeting_key=latest_key)
+            commit_and_push(
+                args.data_repo, f"Update snapshot for meeting {meeting_key}", written
+            )
     finally:
         meter_provider.shutdown()
 

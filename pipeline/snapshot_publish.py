@@ -33,6 +33,13 @@ SNAPSHOT_DIR_NAME = "data/snapshots"
 # used to read) silently fell back to a path inside this checkout.
 _THIS_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# Substrings that must appear in the data repo's origin remote URL before
+# commit_and_push will push to it -- a second, independent check alongside
+# the path-containment guard above, since a correct *path* doesn't by
+# itself prove it's the correct *repo* (e.g. a stale/wrong clone at that
+# path). Override with PITWALL_DATA_REPO_NAME if the repo is ever renamed.
+DEFAULT_EXPECTED_REMOTE_SUBSTRING = "pitwall-data"
+
 
 class WrongRepoError(Exception):
     pass
@@ -56,17 +63,23 @@ def _read_existing(path: Path) -> dict | None:
     return json.loads(path.read_text())
 
 
-def write_snapshot(repo_dir: Path, snapshot: dict, *, is_latest: bool) -> bool:
+def write_snapshot(repo_dir: Path, snapshot: dict, *, is_latest: bool) -> list[Path]:
     """Writes the per-meeting snapshot file (and latest.json, if this is the
-    current meeting). Returns True if the file content actually changed."""
+    current meeting). Returns the paths that were actually written (empty
+    list if nothing changed) -- the caller passes this straight into
+    commit_and_push so only files this run touched get committed, never a
+    blanket `git add -A`."""
     meeting_key = snapshot["meeting_key"]
     path = snapshot_path(repo_dir, meeting_key)
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    written: list[Path] = []
 
     existing = _read_existing(path)
     changed = existing is None or content_hash(existing) != content_hash(snapshot)
     if changed:
         path.write_text(json.dumps(snapshot, indent=2, sort_keys=True))
+        written.append(path)
 
     if is_latest:
         latest = latest_path(repo_dir)
@@ -76,15 +89,15 @@ def write_snapshot(repo_dir: Path, snapshot: dict, *, is_latest: bool) -> bool:
         )
         if latest_changed:
             latest.write_text(json.dumps(snapshot, indent=2, sort_keys=True))
-        changed = changed or latest_changed
+            written.append(latest)
 
-    return changed
+    return written
 
 
-def rebuild_index(repo_dir: Path, latest_meeting_key: int | None) -> bool:
+def rebuild_index(repo_dir: Path, latest_meeting_key: int | None) -> list[Path]:
     """Rebuilds index.json by scanning the repo's own data/snapshots/
     directory, so it's correct regardless of which machine generated each
-    snapshot file. Returns True if index.json content changed."""
+    snapshot file. Returns [index_path] if it changed, else []."""
     snapshots_dir = repo_dir / SNAPSHOT_DIR_NAME
     entries = []
     for path in sorted(snapshots_dir.glob("*.json")):
@@ -111,7 +124,8 @@ def rebuild_index(repo_dir: Path, latest_meeting_key: int | None) -> bool:
     changed = existing is None or existing != index
     if changed:
         index_path(repo_dir).write_text(json.dumps(index, indent=2, sort_keys=True))
-    return changed
+        return [index_path(repo_dir)]
+    return []
 
 
 def _year_from_race_start(snapshot: dict) -> int | None:
@@ -136,11 +150,49 @@ def _guard_against_this_project_repo(repo_dir: Path) -> None:
         )
 
 
-def commit_and_push(repo_dir: Path, message: str) -> bool:
-    """Commits and pushes whatever's staged, if PITWALL_DATA_REPO-style env
-    vars are configured. Returns True if a commit was made. No-ops (and
-    logs why) if publishing isn't configured, so this is safe to call in
-    environments without the pitwall-data repo wired up yet."""
+def _guard_against_wrong_remote(repo_dir: Path) -> None:
+    """Refuses to commit/push if repo_dir's own git origin doesn't look like
+    the pitwall-data repo. A correct PATH doesn't by itself prove it's the
+    correct REPO -- this is an independent check from the path-containment
+    guard above."""
+    expected = os.environ.get("PITWALL_DATA_REPO_NAME", DEFAULT_EXPECTED_REMOTE_SUBSTRING)
+    result = subprocess.run(
+        ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise WrongRepoError(
+            f"Refusing to commit/push: could not read the 'origin' remote for "
+            f"{repo_dir} ({result.stderr.strip()}). Is this a git repo with an "
+            "origin configured?"
+        )
+    origin_url = result.stdout.strip()
+    if expected not in origin_url:
+        raise WrongRepoError(
+            f"Refusing to commit/push: {repo_dir}'s origin remote is "
+            f"{origin_url!r}, which doesn't look like the pitwall-data repo "
+            f"(expected {expected!r} in the URL). Set $PITWALL_DATA_REPO_NAME "
+            "if the repo has been renamed."
+        )
+
+
+def commit_and_push(repo_dir: Path, message: str, paths: list[Path]) -> bool:
+    """Commits and pushes exactly `paths` (the files this run actually
+    wrote), if PITWALL_DATA_REPO-style env vars are configured. Returns
+    True if a commit was made. No-ops (and logs why) if publishing isn't
+    configured, so this is safe to call in environments without the
+    pitwall-data repo wired up yet.
+
+    Deliberately never uses `git add -A`/`git add .`: this repo is shared
+    with other runs and potentially other machines, and a blanket add would
+    stage anything else sitting in the working copy (stray local files,
+    another process's in-progress writes) as part of this run's commit.
+    """
+    if not paths:
+        logger.info("No snapshot files were written this run; nothing to commit.")
+        return False
+
     token = os.environ.get("PITWALL_DATA_TOKEN")
     deploy_key_path = os.environ.get("PITWALL_DATA_DEPLOY_KEY_PATH")
     if not token and not deploy_key_path:
@@ -151,10 +203,13 @@ def commit_and_push(repo_dir: Path, message: str) -> bool:
         return False
 
     _guard_against_this_project_repo(repo_dir)
+    _guard_against_wrong_remote(repo_dir)
 
-    subprocess.run(["git", "-C", str(repo_dir), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "add", "--", *[str(p) for p in paths]], check=True
+    )
     status = subprocess.run(
-        ["git", "-C", str(repo_dir), "status", "--porcelain"],
+        ["git", "-C", str(repo_dir), "status", "--porcelain", "--", *[str(p) for p in paths]],
         check=True,
         capture_output=True,
         text=True,

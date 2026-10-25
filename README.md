@@ -190,3 +190,15 @@ Cloud without a second credential. These series carry `job="alloy"`.
 .venv/bin/pytest tests/ -v
 .venv/bin/ruff check .
 ```
+
+## Pre-commit hooks
+
+A gitleaks pre-commit hook scans every commit for hardcoded secrets before
+it's created. Install it once per checkout:
+
+```
+.venv/bin/pre-commit install
+```
+
+After that, `git commit` runs the scan automatically and blocks the commit
+if it finds anything.
