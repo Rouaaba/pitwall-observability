@@ -6,7 +6,9 @@ import pytest
 
 from pipeline.snapshot_publish import (
     _THIS_PROJECT_ROOT,
+    InvariantError,
     WrongRepoError,
+    check_invariants,
     commit_and_push,
     index_path,
     latest_path,
@@ -38,6 +40,13 @@ def init_repo(path, remote_url="https://github.com/Rouaaba/pitwall-data.git"):
     subprocess.run(["git", "config", "user.name", "Test"], cwd=path, check=True)
     if remote_url:
         subprocess.run(["git", "remote", "add", "origin", remote_url], cwd=path, check=True)
+
+
+def seed_empty_valid_index(repo_dir):
+    """A minimal repo state that passes check_invariants: no meetings
+    published yet, which is explicitly allowed. Used by tests that aren't
+    exercising invariant-checking itself."""
+    rebuild_index(repo_dir, latest_meeting_key=None)
 
 
 # ---- write_snapshot ----
@@ -128,6 +137,7 @@ def test_commit_and_push_noop_without_env_vars(tmp_path, monkeypatch):
 def test_commit_and_push_noop_with_no_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("PITWALL_DATA_TOKEN", "fake-token")
     init_repo(tmp_path)
+    seed_empty_valid_index(tmp_path)
     committed = commit_and_push(tmp_path, "test commit", [])
     assert committed is False
 
@@ -139,9 +149,8 @@ def test_commit_and_push_only_adds_the_given_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("PITWALL_DATA_TOKEN", "fake-token")
     init_repo(tmp_path)
 
-    tracked = tmp_path / "data" / "snapshots" / "1221.json"
-    tracked.parent.mkdir(parents=True)
-    tracked.write_text("{}")
+    written = write_snapshot(tmp_path, SNAPSHOT_A, is_latest=True)
+    written += rebuild_index(tmp_path, latest_meeting_key=1221)
 
     untracked_stray = tmp_path / "some_other_file.txt"
     untracked_stray.write_text("should never be committed by this run")
@@ -150,7 +159,7 @@ def test_commit_and_push_only_adds_the_given_paths(tmp_path, monkeypatch):
         # Commit succeeds; push fails only because there's no real network
         # upstream behind this fake origin URL -- that's expected and fine,
         # the thing under test is what got staged/committed before that.
-        commit_and_push(tmp_path, "snapshot commit", [tracked])
+        commit_and_push(tmp_path, "snapshot commit", written)
 
     show = subprocess.run(
         ["git", "-C", str(tmp_path), "show", "--stat", "--format=", "HEAD"],
@@ -181,9 +190,10 @@ def test_commit_and_push_commits_given_paths(tmp_path, monkeypatch):
 def test_commit_and_push_noop_when_given_paths_have_no_changes(tmp_path, monkeypatch):
     monkeypatch.setenv("PITWALL_DATA_TOKEN", "fake-token")
     init_repo(tmp_path)
+    seed_empty_valid_index(tmp_path)
     f = tmp_path / "file.txt"
     f.write_text("hello")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "--", "file.txt"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "--", "."], check=True)
     subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "initial"], check=True)
 
     committed = commit_and_push(tmp_path, "no-op commit", [f])
@@ -242,6 +252,7 @@ def test_commit_and_push_accepts_correct_origin_and_proceeds_to_push(tmp_path, m
     # A valid-looking origin that doesn't actually exist on the network --
     # proves the guards passed and it got as far as attempting push.
     init_repo(tmp_path, remote_url="https://github.com/Rouaaba/pitwall-data.git")
+    seed_empty_valid_index(tmp_path)
     f = tmp_path / "file.txt"
     f.write_text("hello")
     with pytest.raises(subprocess.CalledProcessError):
@@ -258,8 +269,124 @@ def test_commit_and_push_remote_name_override(tmp_path, monkeypatch):
     monkeypatch.setenv("PITWALL_DATA_TOKEN", "fake-token")
     monkeypatch.setenv("PITWALL_DATA_REPO_NAME", "my-renamed-data-repo")
     init_repo(tmp_path, remote_url="https://github.com/Rouaaba/my-renamed-data-repo.git")
+    seed_empty_valid_index(tmp_path)
     f = tmp_path / "file.txt"
     f.write_text("hello")
     with pytest.raises(subprocess.CalledProcessError):
         # Passes both guards (override matched), fails only at the network push.
         commit_and_push(tmp_path, "test commit", [f])
+
+
+# ---- write_snapshot: the comparison must be scoped to repo_dir, and a
+# missing file is always written regardless of what matches elsewhere ----
+
+
+def test_write_snapshot_always_writes_when_file_missing_from_repo_dir(tmp_path):
+    """The exact failure shape reported: a snapshot with matching content
+    exists SOMEWHERE (e.g. a different directory, from an earlier
+    misdirected run), but not in this repo_dir -- it must be written here
+    regardless, never skipped because 'equivalent' content exists
+    elsewhere. write_snapshot only ever reads via repo_dir, so this also
+    guards against any future regression that accidentally widens the
+    comparison beyond repo_dir."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    # Write byte-identical content at a DIFFERENT location than repo_dir.
+    write_snapshot(elsewhere, SNAPSHOT_A, is_latest=True)
+    assert snapshot_path(elsewhere, 1221).exists()
+
+    repo_dir = tmp_path / "real_repo"
+    repo_dir.mkdir()
+    assert not snapshot_path(repo_dir, 1221).exists()
+
+    written = write_snapshot(repo_dir, SNAPSHOT_A, is_latest=True)
+    assert snapshot_path(repo_dir, 1221) in written
+    assert latest_path(repo_dir) in written
+    assert snapshot_path(repo_dir, 1221).exists()
+    assert latest_path(repo_dir).exists()
+
+
+# ---- check_invariants ----
+
+
+def _write_consistent_repo(repo_dir: Path) -> None:
+    write_snapshot(repo_dir, SNAPSHOT_A, is_latest=True)
+    rebuild_index(repo_dir, latest_meeting_key=1221)
+
+
+def test_check_invariants_passes_for_consistent_repo(tmp_path):
+    _write_consistent_repo(tmp_path)
+    check_invariants(tmp_path)  # must not raise
+
+
+def test_check_invariants_passes_with_no_meetings_published_yet(tmp_path):
+    rebuild_index(tmp_path, latest_meeting_key=None)
+    check_invariants(tmp_path)  # must not raise -- nothing published, nothing to check
+
+
+def test_check_invariants_fails_when_index_missing(tmp_path):
+    with pytest.raises(InvariantError, match="index.json is missing"):
+        check_invariants(tmp_path)
+
+
+def test_check_invariants_fails_when_latest_not_in_snapshots_list(tmp_path):
+    _write_consistent_repo(tmp_path)
+    index_path(tmp_path).write_text(
+        json.dumps({"latest": 9999, "snapshots": [{"meeting_key": 1221}]})
+    )
+    with pytest.raises(InvariantError, match="not present in its own snapshots list"):
+        check_invariants(tmp_path)
+
+
+def test_check_invariants_fails_when_latest_meeting_file_missing(tmp_path):
+    """The exact bug reported: index.json claims latest=1297, but
+    1297.json was never actually written/committed to the data repo."""
+    _write_consistent_repo(tmp_path)
+    index_path(tmp_path).write_text(
+        json.dumps({"latest": 1297, "snapshots": [{"meeting_key": 1297}]})
+    )
+    with pytest.raises(InvariantError, match=r"1297\.json.*does not exist"):
+        check_invariants(tmp_path)
+
+
+def test_check_invariants_fails_when_latest_json_missing(tmp_path):
+    write_snapshot(tmp_path, SNAPSHOT_A, is_latest=False)  # no is_latest -> no latest.json
+    rebuild_index(tmp_path, latest_meeting_key=1221)
+    with pytest.raises(InvariantError, match="latest.json does not exist"):
+        check_invariants(tmp_path)
+
+
+# ---- commit_and_push refuses to publish when invariants fail ----
+
+
+def test_commit_and_push_refuses_when_invariants_fail(tmp_path, monkeypatch):
+    monkeypatch.setenv("PITWALL_DATA_TOKEN", "fake-token")
+    init_repo(tmp_path)
+    index_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    index_path(tmp_path).write_text(
+        json.dumps({"latest": 1297, "snapshots": [{"meeting_key": 1297}]})
+    )
+    f = tmp_path / "unrelated.txt"
+    f.write_text("hello")
+    with pytest.raises(InvariantError):
+        commit_and_push(tmp_path, "should be refused", [f])
+
+    status = subprocess.run(
+        ["git", "-C", str(tmp_path), "log", "--oneline"],
+        capture_output=True, text=True,
+    )
+    assert status.stdout.strip() == ""  # nothing was ever committed
+
+
+def test_commit_and_push_checks_invariants_even_with_no_new_paths(tmp_path, monkeypatch):
+    """A run that wrote nothing new this time must still refuse to publish
+    if the repo was already left broken by an earlier run -- the check
+    must not be skipped just because `paths` is empty."""
+    monkeypatch.setenv("PITWALL_DATA_TOKEN", "fake-token")
+    init_repo(tmp_path)
+    index_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    index_path(tmp_path).write_text(
+        json.dumps({"latest": 1297, "snapshots": [{"meeting_key": 1297}]})
+    )
+    with pytest.raises(InvariantError):
+        commit_and_push(tmp_path, "should be refused", [])

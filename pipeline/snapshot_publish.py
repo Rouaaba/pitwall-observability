@@ -45,6 +45,14 @@ class WrongRepoError(Exception):
     pass
 
 
+class InvariantError(Exception):
+    """Raised by check_invariants when the data repo's working copy is
+    internally inconsistent -- e.g. index.json claims a "latest" meeting
+    whose snapshot file doesn't actually exist. A run that hits this must
+    not commit/push, since doing so would publish (or perpetuate) broken
+    state for consumers reading index.json."""
+
+
 def snapshot_path(repo_dir: Path, meeting_key: int) -> Path:
     return repo_dir / SNAPSHOT_DIR_NAME / f"{meeting_key}.json"
 
@@ -99,6 +107,7 @@ def rebuild_index(repo_dir: Path, latest_meeting_key: int | None) -> list[Path]:
     directory, so it's correct regardless of which machine generated each
     snapshot file. Returns [index_path] if it changed, else []."""
     snapshots_dir = repo_dir / SNAPSHOT_DIR_NAME
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
     entries = []
     for path in sorted(snapshots_dir.glob("*.json")):
         if path.name in ("latest.json", "index.json"):
@@ -126,6 +135,50 @@ def rebuild_index(repo_dir: Path, latest_meeting_key: int | None) -> list[Path]:
         index_path(repo_dir).write_text(json.dumps(index, indent=2, sort_keys=True))
         return [index_path(repo_dir)]
     return []
+
+
+def check_invariants(repo_dir: Path) -> None:
+    """Checked before every commit. Raises InvariantError (without writing
+    or committing anything) if the data repo's working copy is internally
+    inconsistent:
+
+      - index.json's "latest" entry must be present in its own
+        "snapshots" list.
+      - both <latest>.json and latest.json must actually exist on disk.
+
+    This exists because a run can write snapshot/index files to the repo's
+    working copy and then fail or be interrupted before (or during) the
+    git commit/push -- e.g. a crash, a network failure on push, or an
+    earlier run writing into the wrong repo entirely (see
+    _guard_against_this_project_repo / _guard_against_wrong_remote). A
+    later run's "only rewrite if content changed" check compares against
+    whatever is sitting in the working copy, which can silently paper over
+    that kind of partial/interrupted state -- this is the explicit backstop
+    that catches it before anything gets published.
+    """
+    index = _read_existing(index_path(repo_dir))
+    if index is None:
+        raise InvariantError(f"index.json is missing in {repo_dir}")
+
+    latest_key = index.get("latest")
+    if latest_key is None:
+        return  # no meetings published yet; nothing to check
+
+    listed_keys = {s["meeting_key"] for s in index.get("snapshots", [])}
+    if latest_key not in listed_keys:
+        raise InvariantError(
+            f"index.json's latest={latest_key!r} is not present in its own "
+            f"snapshots list ({sorted(listed_keys)})"
+        )
+
+    latest_meeting_file = snapshot_path(repo_dir, latest_key)
+    if not latest_meeting_file.exists():
+        raise InvariantError(
+            f"index.json's latest={latest_key!r} but {latest_meeting_file} does not exist"
+        )
+
+    if not latest_path(repo_dir).exists():
+        raise InvariantError(f"{latest_path(repo_dir)} does not exist")
 
 
 def _year_from_race_start(snapshot: dict) -> int | None:
@@ -188,11 +241,13 @@ def commit_and_push(repo_dir: Path, message: str, paths: list[Path]) -> bool:
     with other runs and potentially other machines, and a blanket add would
     stage anything else sitting in the working copy (stray local files,
     another process's in-progress writes) as part of this run's commit.
-    """
-    if not paths:
-        logger.info("No snapshot files were written this run; nothing to commit.")
-        return False
 
+    check_invariants() is run unconditionally, even if `paths` is empty --
+    a run that wrote nothing new must still refuse to publish if the repo
+    is already in a broken state left by an earlier run (e.g. index.json
+    references a snapshot file that was never actually committed), rather
+    than silently returning before that gets checked.
+    """
     token = os.environ.get("PITWALL_DATA_TOKEN")
     deploy_key_path = os.environ.get("PITWALL_DATA_DEPLOY_KEY_PATH")
     if not token and not deploy_key_path:
@@ -204,6 +259,11 @@ def commit_and_push(repo_dir: Path, message: str, paths: list[Path]) -> bool:
 
     _guard_against_this_project_repo(repo_dir)
     _guard_against_wrong_remote(repo_dir)
+    check_invariants(repo_dir)
+
+    if not paths:
+        logger.info("No snapshot files were written this run; nothing to commit.")
+        return False
 
     subprocess.run(
         ["git", "-C", str(repo_dir), "add", "--", *[str(p) for p in paths]], check=True
