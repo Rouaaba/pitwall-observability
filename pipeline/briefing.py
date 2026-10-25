@@ -23,6 +23,8 @@ from .briefing_meeting_select import resolve_latest_meeting_key
 from .briefing_metrics import build_briefing_meter_provider, create_briefing_metrics
 from .briefing_snapshot import build_snapshot
 from .openf1_client import OpenF1Client
+from .race_centre_fetch import fetch_race_centre_data
+from .race_centre_snapshot import build_race_centre_snapshot
 from .snapshot_publish import (
     commit_and_push,
     rebuild_index,
@@ -123,6 +125,28 @@ def generate_one_meeting(
     return written
 
 
+def generate_race_centre(
+    client: OpenF1Client, repo_dir: Path, meeting_key: int, now: datetime, *, is_latest: bool
+) -> list[Path]:
+    """Same change-check/publish rules as the briefing snapshot, under the
+    "race_" filename prefix. Always regenerates (post-race data changes
+    frequently during a race weekend; write_snapshot's content-hash check
+    still skips the actual file write if nothing changed)."""
+    try:
+        meeting_data = fetch_meeting_data(client, meeting_key, now)
+        rc_data = fetch_race_centre_data(client, meeting_data, now)
+        snapshot = build_race_centre_snapshot(rc_data, now)
+    except Exception:
+        logger.exception("Failed to generate race_centre snapshot for meeting_key=%s", meeting_key)
+        raise
+    written = write_snapshot(repo_dir, snapshot, is_latest=is_latest, prefix="race_")
+    logger.info(
+        "[%s] race_centre meeting_key=%s phase=%s",
+        "changed" if written else "unchanged", meeting_key, snapshot["phase"],
+    )
+    return written
+
+
 def run_backfill(
     client: OpenF1Client,
     repo_dir: Path,
@@ -199,7 +223,14 @@ def main(argv: list[str] | None = None) -> None:
                 is_latest=(meeting_key == latest_key),
                 force=args.force, metrics=metrics,
             )
-            written += rebuild_index(args.data_repo, latest_meeting_key=latest_key)
+            written += generate_race_centre(
+                client, args.data_repo, meeting_key, now,
+                is_latest=(meeting_key == latest_key),
+            )
+            written += rebuild_index(
+                args.data_repo, latest_meeting_key=latest_key,
+                race_latest_meeting_key=latest_key,
+            )
             commit_and_push(
                 args.data_repo, f"Update snapshot for meeting {meeting_key}", written
             )

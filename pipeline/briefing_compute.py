@@ -4,11 +4,51 @@ dicts/lists, which is the point: these are the computations the spec cares
 about getting right (risk counts, podium joins, pace sorting).
 """
 
+import re
 from datetime import datetime, timedelta
 
 from .briefing_fetch import MeetingData, YearData
 
 DEFAULT_FINAL_GRACE_PERIOD = timedelta(hours=24)
+
+# e.g. "CAR 10 (GAS) TIME 1:36.764 DELETED - TRACK LIMITS AT TURN 9 LAP 3 16:07:14"
+_DELETED_LAP_RE = re.compile(
+    r"CAR\s+(?P<driver_number>\d+)\s*\([^)]*\)\s*TIME\s+(?P<time>[\d:.]+)\s+DELETED"
+)
+
+
+def _parse_lap_time_to_seconds(text: str) -> float | None:
+    parts = text.split(":")
+    try:
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+        return float(parts[0])
+    except ValueError:
+        return None
+
+
+def parse_deleted_laps(race_control: list) -> set[tuple[int, float]]:
+    """Returns a set of (driver_number, lap_time_seconds) for every lap
+    OpenF1's race control messages report as deleted (e.g. track limits).
+    OpenF1's /laps endpoint still includes these, so every pace
+    calculation must exclude them explicitly."""
+    deleted = set()
+    for rc in race_control:
+        message = rc.get("message") or ""
+        m = _DELETED_LAP_RE.search(message)
+        if not m:
+            continue
+        seconds = _parse_lap_time_to_seconds(m.group("time"))
+        if seconds is None:
+            continue
+        deleted.add((int(m.group("driver_number")), round(seconds, 3)))
+    return deleted
+
+
+def _hex_colour(value: str | None) -> str | None:
+    if not value:
+        return None
+    return value if value.startswith("#") else f"#{value}"
 
 
 def _driver_info(drivers: dict[int, dict], driver_number: int) -> dict:
@@ -18,7 +58,7 @@ def _driver_info(drivers: dict[int, dict], driver_number: int) -> dict:
     return {
         "driver": d["name_acronym"],
         "team": d["team_name"],
-        "team_colour": d.get("team_colour"),
+        "team_colour": _hex_colour(d.get("team_colour")),
     }
 
 
@@ -122,7 +162,12 @@ def compute_podiums(history: list[YearData]) -> list[dict]:
             if result is None:
                 row[key] = None
             else:
-                row[key] = _driver_info(yd.drivers, result["driver_number"])["driver"]
+                info = _driver_info(yd.drivers, result["driver_number"])
+                row[key] = {
+                    "driver": info["driver"],
+                    "team": info["team"],
+                    "team_colour": info["team_colour"],
+                }
         rows.append(row)
     return rows
 
@@ -143,7 +188,14 @@ def compute_pit_stops_last_year(history: list[YearData]) -> list[dict]:
     rows = []
     for driver_number, stops in counts.items():
         info = _driver_info(yd.drivers, driver_number)
-        rows.append({"driver": info["driver"], "team": info["team"], "stops": stops})
+        rows.append(
+            {
+                "driver": info["driver"],
+                "team": info["team"],
+                "team_colour": info["team_colour"],
+                "stops": stops,
+            }
+        )
     rows.sort(key=lambda r: r["stops"], reverse=True)
     return rows
 
@@ -151,12 +203,26 @@ def compute_pit_stops_last_year(history: list[YearData]) -> list[dict]:
 # ---- session_pace ----
 
 
-def compute_session_pace(sessions: list, laps: list, drivers: dict[int, dict]) -> list[dict]:
+def compute_session_pace(
+    sessions: list,
+    laps: list,
+    drivers: dict[int, dict],
+    deleted_laps: set[tuple[int, float]] | None = None,
+    qualifying_order: list[str] | None = None,
+) -> list[dict]:
+    """Best VALID lap per driver per session -- a pace view, not a ranking.
+    Deleted laps (track limits etc.) are excluded. Sorted by official
+    qualifying position once qualifying has run (qualifying_order, a list
+    of driver acronyms in finishing order), otherwise by the latest
+    session."""
+    deleted_laps = deleted_laps or set()
     completed_sessions = {s["session_key"]: s for s in sessions}
     best_by_driver_session: dict[tuple[int, int], float] = {}
     for lap in laps:
         duration = lap.get("lap_duration")
         if duration is None:
+            continue
+        if (lap["driver_number"], round(duration, 3)) in deleted_laps:
             continue
         key = (lap["driver_number"], lap.get("session_key"))
         if key not in best_by_driver_session or duration < best_by_driver_session[key]:
@@ -172,12 +238,45 @@ def compute_session_pace(sessions: list, laps: list, drivers: dict[int, dict]) -
             {
                 "driver": info["driver"],
                 "team": info["team"],
+                "team_colour": info["team_colour"],
                 "session": session["session_name"],
                 "session_start": session["date_start"],
                 "best_lap_seconds": best_lap,
             }
         )
-    rows.sort(key=lambda r: r["session_start"], reverse=True)
+
+    if qualifying_order:
+        order_index = {driver: i for i, driver in enumerate(qualifying_order)}
+        rows.sort(key=lambda r: order_index.get(r["driver"], len(order_index)))
+    else:
+        rows.sort(key=lambda r: r["session_start"], reverse=True)
+    return rows
+
+
+# ---- qualifying_result ----
+
+
+def compute_qualifying_result(session_result: list, drivers: dict[int, dict]) -> list[dict]:
+    """The official qualifying order from /session_result -- ranked by
+    segment (Q1/Q2/Q3 knockout), not recomputed from lap times."""
+    rows_raw = sorted(
+        (r for r in session_result if r.get("position") is not None),
+        key=lambda r: r["position"],
+    )
+    rows = []
+    for r in rows_raw:
+        info = _driver_info(drivers, r["driver_number"])
+        duration = r.get("duration")
+        q_times = duration if isinstance(duration, list) else [duration] if duration else []
+        rows.append(
+            {
+                "position": r["position"],
+                "driver": info["driver"],
+                "team": info["team"],
+                "team_colour": info["team_colour"],
+                "q_times": q_times,
+            }
+        )
     return rows
 
 
@@ -226,6 +325,9 @@ def compute_conditions(weather: list) -> dict:
                 "date": w["date"],
                 "track_temperature": w.get("track_temperature"),
                 "air_temperature": w.get("air_temperature"),
+                "humidity": w.get("humidity"),
+                "wind_speed": w.get("wind_speed"),
+                "rainfall": w.get("rainfall"),
             }
             for w in series
         ],
@@ -252,10 +354,167 @@ def compute_standings(standings: list, drivers: dict[int, dict]) -> list[dict]:
                 "position": s["position_current"],
                 "driver": info["driver"],
                 "team": info["team"],
+                "team_colour": info["team_colour"],
                 "points": s["points_current"],
                 "gap_to_leader": leader_points - s["points_current"],
             }
         )
+    return rows
+
+
+# ---- race_replay ----
+
+
+def compute_race_replay(replay_race) -> dict:
+    """Positions per lap per driver, with per-lap pit/SC/VSC/red-flag flags.
+    Position is sampled from /position at each lap's end time (nearest
+    reading at or before lap_end)."""
+    if replay_race is None:
+        return {"year": None, "laps": []}
+
+    drivers = replay_race.drivers
+    pit_laps = {(p["driver_number"], p.get("lap_number")) for p in replay_race.pit}
+
+    # Per-lap incident flags, derived from race_control messages' lap_number.
+    sc_laps, vsc_laps, red_laps = set(), set(), set()
+    for rc in replay_race.race_control:
+        lap_number = rc.get("lap_number")
+        if lap_number is None:
+            continue
+        message = (rc.get("message") or "").upper()
+        if rc.get("category") == "SafetyCar":
+            if "VIRTUAL" in message:
+                vsc_laps.add(lap_number)
+            elif "DEPLOYED" in message or "SAFETY CAR" in message:
+                sc_laps.add(lap_number)
+        if rc.get("flag") == "RED":
+            red_laps.add(lap_number)
+
+    position_sorted = sorted(replay_race.position, key=lambda p: p["date"])
+
+    def position_at(driver_number: int, at_time: str) -> int | None:
+        best = None
+        for p in position_sorted:
+            if p["driver_number"] != driver_number:
+                continue
+            if p["date"] > at_time:
+                break
+            best = p["position"]
+        return best
+
+    rows = []
+    for lap in replay_race.laps:
+        driver_number = lap["driver_number"]
+        lap_number = lap.get("lap_number")
+        start = lap.get("date_start")
+        duration = lap.get("lap_duration")
+        if start is None or duration is None:
+            continue
+        lap_end = (datetime.fromisoformat(start) + timedelta(seconds=duration)).isoformat()
+        info = _driver_info(drivers, driver_number)
+        rows.append(
+            {
+                "lap": lap_number,
+                "driver": info["driver"],
+                "team_colour": info["team_colour"],
+                "position": position_at(driver_number, lap_end),
+                "pit": (driver_number, lap_number) in pit_laps,
+                "safety_car": lap_number in sc_laps,
+                "virtual_safety_car": lap_number in vsc_laps,
+                "red_flag": lap_number in red_laps,
+            }
+        )
+    rows.sort(key=lambda r: (r["lap"] or 0, r["driver"]))
+    return {"year": replay_race.year, "laps": rows}
+
+
+# ---- tyre_strategy ----
+
+
+def compute_tyre_strategy(replay_race) -> list[dict]:
+    if replay_race is None:
+        return []
+    pit_by_driver: dict[int, list[dict]] = {}
+    for p in replay_race.pit:
+        pit_by_driver.setdefault(p["driver_number"], []).append(
+            {"lap": p.get("lap_number"), "duration": p.get("pit_duration")}
+        )
+
+    rows = []
+    for driver_number, stints in _group_by(replay_race.stints, "driver_number").items():
+        info = _driver_info(replay_race.drivers, driver_number)
+        rows.append(
+            {
+                "driver": info["driver"],
+                "team_colour": info["team_colour"],
+                "stints": [
+                    {
+                        "compound": s.get("compound"),
+                        "lap_start": s.get("lap_start"),
+                        "lap_end": s.get("lap_end"),
+                    }
+                    for s in stints
+                ],
+                "pit_stops": pit_by_driver.get(driver_number, []),
+            }
+        )
+    return rows
+
+
+def _group_by(records: list, key: str) -> dict:
+    grouped: dict = {}
+    for r in records:
+        grouped.setdefault(r[key], []).append(r)
+    return grouped
+
+
+# ---- qualifying_gaps ----
+
+
+def compute_qualifying_gaps(qualifying_result: list) -> list[dict]:
+    if not qualifying_result:
+        return []
+    pole_time = None
+    for r in qualifying_result:
+        if r["q_times"]:
+            pole_time = min(t for t in r["q_times"] if t is not None)
+            break
+    rows = []
+    for r in qualifying_result:
+        best = min((t for t in r["q_times"] if t is not None), default=None)
+        gap = round(best - pole_time, 3) if best is not None and pole_time is not None else None
+        rows.append(
+            {
+                "driver": r["driver"],
+                "team_colour": r["team_colour"],
+                "position": r["position"],
+                "best_time": best,
+                "gap_to_pole": gap,
+            }
+        )
+    return rows
+
+
+# ---- standings_progression ----
+
+
+def compute_standings_progression(rounds: list[dict], drivers: dict[int, dict]) -> list[dict]:
+    """`rounds` is [{round, race_name, standings: [championship_drivers rows]}, ...]."""
+    rows = []
+    for rnd in rounds:
+        for s in rnd["standings"]:
+            if s.get("position_current") is None:
+                continue
+            info = _driver_info(drivers, s["driver_number"])
+            rows.append(
+                {
+                    "round": rnd["round"],
+                    "race_name": rnd["race_name"],
+                    "driver": info["driver"],
+                    "team_colour": info["team_colour"],
+                    "points": s["points_current"],
+                }
+            )
     return rows
 
 

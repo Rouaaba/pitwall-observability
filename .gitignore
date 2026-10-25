@@ -8,3 +8,15 @@ data/*/
 !data/.gitkeep
 node_modules/
 dist/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+
+# scripts/build_dashboards.py output
+terraform/grafana/build/

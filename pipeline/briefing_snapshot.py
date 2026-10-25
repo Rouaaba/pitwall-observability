@@ -13,10 +13,16 @@ from .briefing_compute import (
     compute_meeting_section,
     compute_pit_stops_last_year,
     compute_podiums,
+    compute_qualifying_gaps,
+    compute_qualifying_result,
+    compute_race_replay,
     compute_risk_by_year,
     compute_session_pace,
     compute_sessions_section,
     compute_standings,
+    compute_standings_progression,
+    compute_tyre_strategy,
+    parse_deleted_laps,
 )
 from .briefing_fetch import MeetingData
 
@@ -34,13 +40,27 @@ def build_snapshot(
         {s["session_key"] for s in data.sessions if s.get("session_key")}
     )
 
+    deleted_laps = parse_deleted_laps(data.race_control)
+    qualifying_result = compute_qualifying_result(data.qualifying_session_result, data.drivers)
+    qualifying_order = [r["driver"] for r in qualifying_result] or None
+
     snapshot = {
+        "schema_version": 3,
         "meeting_key": data.meeting["meeting_key"],
         "meeting": compute_meeting_section(data, now),
         "risk_by_year": compute_risk_by_year(data.history),
         "podiums": compute_podiums(data.history),
         "pit_stops_last_year": compute_pit_stops_last_year(data.history),
-        "session_pace": compute_session_pace(data.sessions, data.laps, data.drivers),
+        "session_pace": compute_session_pace(
+            data.sessions, data.laps, data.drivers, deleted_laps, qualifying_order
+        ),
+        "qualifying_result": qualifying_result,
+        "qualifying_gaps": compute_qualifying_gaps(qualifying_result),
+        "race_replay": compute_race_replay(data.replay_race),
+        "tyre_strategy": compute_tyre_strategy(data.replay_race),
+        "standings_progression": compute_standings_progression(
+            data.standings_progression_rounds, data.drivers
+        ),
         "sessions": compute_sessions_section(data.sessions, now),
         "conditions": compute_conditions(data.weather),
         "standings": compute_standings(data.standings, data.drivers),

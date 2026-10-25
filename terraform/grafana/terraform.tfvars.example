@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars and fill in real values. terraform.tfvars is
+# gitignored; never commit it. In CI, these come from HCP Terraform
+# workspace variables instead (see docs/DEPLOY.md).
+
+grafana_url            = "https://rouaabenayed.grafana.net"
+grafana_auth            = "<Grafana service account token, Admin role>"
+grafana_cloud_api_key    = "<Grafana Cloud access policy token, stack-plugins:read/write/delete>"
+grafana_stack_slug      = "rouaabenayed"
+infinity_allowed_host    = "rouaaba.github.io"

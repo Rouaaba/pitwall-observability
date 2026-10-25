@@ -53,12 +53,12 @@ class InvariantError(Exception):
     state for consumers reading index.json."""
 
 
-def snapshot_path(repo_dir: Path, meeting_key: int) -> Path:
-    return repo_dir / SNAPSHOT_DIR_NAME / f"{meeting_key}.json"
+def snapshot_path(repo_dir: Path, meeting_key: int, prefix: str = "") -> Path:
+    return repo_dir / SNAPSHOT_DIR_NAME / f"{prefix}{meeting_key}.json"
 
 
-def latest_path(repo_dir: Path) -> Path:
-    return repo_dir / SNAPSHOT_DIR_NAME / "latest.json"
+def latest_path(repo_dir: Path, prefix: str = "") -> Path:
+    return repo_dir / SNAPSHOT_DIR_NAME / f"{prefix}latest.json"
 
 
 def index_path(repo_dir: Path) -> Path:
@@ -71,14 +71,17 @@ def _read_existing(path: Path) -> dict | None:
     return json.loads(path.read_text())
 
 
-def write_snapshot(repo_dir: Path, snapshot: dict, *, is_latest: bool) -> list[Path]:
+def write_snapshot(
+    repo_dir: Path, snapshot: dict, *, is_latest: bool, prefix: str = ""
+) -> list[Path]:
     """Writes the per-meeting snapshot file (and latest.json, if this is the
     current meeting). Returns the paths that were actually written (empty
     list if nothing changed) -- the caller passes this straight into
     commit_and_push so only files this run touched get committed, never a
-    blanket `git add -A`."""
+    blanket `git add -A`. `prefix` distinguishes snapshot types sharing the
+    same directory, e.g. "race_" for race_centre snapshots."""
     meeting_key = snapshot["meeting_key"]
-    path = snapshot_path(repo_dir, meeting_key)
+    path = snapshot_path(repo_dir, meeting_key, prefix)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     written: list[Path] = []
@@ -90,7 +93,7 @@ def write_snapshot(repo_dir: Path, snapshot: dict, *, is_latest: bool) -> list[P
         written.append(path)
 
     if is_latest:
-        latest = latest_path(repo_dir)
+        latest = latest_path(repo_dir, prefix)
         existing_latest = _read_existing(latest)
         latest_changed = (
             existing_latest is None or content_hash(existing_latest) != content_hash(snapshot)
@@ -102,7 +105,9 @@ def write_snapshot(repo_dir: Path, snapshot: dict, *, is_latest: bool) -> list[P
     return written
 
 
-def rebuild_index(repo_dir: Path, latest_meeting_key: int | None) -> list[Path]:
+def rebuild_index(
+    repo_dir: Path, latest_meeting_key: int | None, race_latest_meeting_key: int | None = None
+) -> list[Path]:
     """Rebuilds index.json by scanning the repo's own data/snapshots/
     directory, so it's correct regardless of which machine generated each
     snapshot file. Returns [index_path] if it changed, else []."""
@@ -110,16 +115,18 @@ def rebuild_index(repo_dir: Path, latest_meeting_key: int | None) -> list[Path]:
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     entries = []
     for path in sorted(snapshots_dir.glob("*.json")):
-        if path.name in ("latest.json", "index.json"):
+        if path.name in ("latest.json", "index.json", "race_latest.json"):
             continue
         snapshot = json.loads(path.read_text())
+        is_race = snapshot.get("type") == "race_centre"
         entries.append(
             {
                 "meeting_key": snapshot["meeting_key"],
-                "meeting_name": snapshot["meeting"]["name"],
-                "year": _year_from_race_start(snapshot),
-                "date": snapshot["meeting"].get("race_start"),
-                "final": snapshot.get("final", False),
+                "type": "race_centre" if is_race else "briefing",
+                "meeting_name": None if is_race else snapshot["meeting"]["name"],
+                "year": None if is_race else _year_from_race_start(snapshot),
+                "date": None if is_race else snapshot["meeting"].get("race_start"),
+                "final": snapshot.get("final", snapshot.get("phase") == "post_race"),
             }
         )
     entries.sort(key=lambda e: e.get("date") or "", reverse=True)
@@ -127,6 +134,7 @@ def rebuild_index(repo_dir: Path, latest_meeting_key: int | None) -> list[Path]:
     index = {
         "snapshots": entries,
         "latest": latest_meeting_key,
+        "race_latest": race_latest_meeting_key,
     }
 
     existing = _read_existing(index_path(repo_dir))
@@ -179,6 +187,16 @@ def check_invariants(repo_dir: Path) -> None:
 
     if not latest_path(repo_dir).exists():
         raise InvariantError(f"{latest_path(repo_dir)} does not exist")
+
+    race_latest_key = index.get("race_latest")
+    if race_latest_key is not None:
+        race_file = snapshot_path(repo_dir, race_latest_key, prefix="race_")
+        if not race_file.exists():
+            raise InvariantError(
+                f"index.json's race_latest={race_latest_key!r} but {race_file} does not exist"
+            )
+        if not latest_path(repo_dir, prefix="race_").exists():
+            raise InvariantError(f"{latest_path(repo_dir, prefix='race_')} does not exist")
 
 
 def _year_from_race_start(snapshot: dict) -> int | None:

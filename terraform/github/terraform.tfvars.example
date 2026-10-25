@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and fill in real values. terraform.tfvars is
+# gitignored; never commit it. In CI, these come from HCP Terraform
+# workspace variables instead (see docs/DEPLOY.md).
+
+github_owner                 = "Rouaaba"
+github_token                 = "<GitHub PAT with repo + admin:public_key scopes>"
+grafana_auth_secret          = "<same Grafana service account token used in terraform/grafana>"
+grafana_cloud_api_key_secret = "<same Grafana Cloud access policy token used in terraform/grafana>"
+tf_api_token_secret          = "<HCP Terraform API token for CI>"
+grafana_otlp_endpoint        = "<same value as GRAFANA_OTLP_ENDPOINT in .env>"
+grafana_instance_id          = "<same value as GRAFANA_INSTANCE_ID in .env>"
+grafana_otlp_token           = "<same value as GRAFANA_OTLP_TOKEN in .env>"

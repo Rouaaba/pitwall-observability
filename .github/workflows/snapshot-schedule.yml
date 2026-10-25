@@ -1,0 +1,45 @@
+name: Briefing Snapshot
+
+on:
+  schedule:
+    - cron: "*/30 * * * *" # every 30 minutes, UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pitwall-observability
+
+      - name: Checkout pitwall-data via deploy key
+        uses: actions/checkout@v4
+        with:
+          repository: Rouaaba/pitwall-data
+          ssh-key: ${{ secrets.PITWALL_DATA_DEPLOY_KEY }}
+          path: pitwall-data
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: pitwall-observability
+        run: pip install -r requirements.txt
+
+      - name: Generate and publish snapshot
+        working-directory: pitwall-observability
+        env:
+          PITWALL_DATA_REPO: ${{ github.workspace }}/pitwall-data
+          PITWALL_DATA_DEPLOY_KEY_PATH: /tmp/pitwall-data-deploy-key
+          OTLP_ENDPOINT: ${{ secrets.GRAFANA_OTLP_ENDPOINT }}
+          GRAFANA_INSTANCE_ID: ${{ secrets.GRAFANA_INSTANCE_ID }}
+          GRAFANA_OTLP_TOKEN: ${{ secrets.GRAFANA_OTLP_TOKEN }}
+        run: |
+          echo "${{ secrets.PITWALL_DATA_DEPLOY_KEY }}" > /tmp/pitwall-data-deploy-key
+          chmod 600 /tmp/pitwall-data-deploy-key
+          python3 -m pipeline.briefing --meeting latest

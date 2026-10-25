@@ -75,7 +75,15 @@ def test_podiums_joins_driver_acronyms():
     ]
     history = [YearData(year=2023, status="ok", session_result=session_result, drivers=DRIVERS)]
     rows = compute_podiums(history)
-    assert rows == [{"year": 2023, "status": "ok", "p1": "VER", "p2": "PIA", "p3": "HAM"}]
+    assert rows == [
+        {
+            "year": 2023,
+            "status": "ok",
+            "p1": {"driver": "VER", "team": "Red Bull Racing", "team_colour": "#3671C6"},
+            "p2": {"driver": "PIA", "team": "McLaren", "team_colour": "#FF8000"},
+            "p3": {"driver": "HAM", "team": "Ferrari", "team_colour": "#E8002D"},
+        }
+    ]
 
 
 def test_podiums_handles_missing_position():
@@ -86,7 +94,7 @@ def test_podiums_handles_missing_position():
     ]
     history = [YearData(year=2023, status="ok", session_result=session_result, drivers=DRIVERS)]
     rows = compute_podiums(history)
-    assert rows[0]["p1"] == "VER"
+    assert rows[0]["p1"]["driver"] == "VER"
     assert rows[0]["p2"] is None
     assert rows[0]["p3"] is None
 
@@ -115,9 +123,9 @@ def test_pit_stops_last_year_counts_and_sorts_descending():
     history = [YearData(year=2023, status="ok", pit=pit, drivers=DRIVERS)]
     rows = compute_pit_stops_last_year(history)
     assert rows == [
-        {"driver": "VER", "team": "Red Bull Racing", "stops": 3},
-        {"driver": "PIA", "team": "McLaren", "stops": 2},
-        {"driver": "HAM", "team": "Ferrari", "stops": 1},
+        {"driver": "VER", "team": "Red Bull Racing", "team_colour": "#3671C6", "stops": 3},
+        {"driver": "PIA", "team": "McLaren", "team_colour": "#FF8000", "stops": 2},
+        {"driver": "HAM", "team": "Ferrari", "team_colour": "#E8002D", "stops": 1},
     ]
 
 
@@ -136,7 +144,9 @@ def test_pit_stops_last_year_uses_most_recent_history_year():
         YearData(year=2022, status="no_data", pit=pit_2022, drivers=DRIVERS),
     ]
     rows = compute_pit_stops_last_year(history)
-    assert rows == [{"driver": "VER", "team": "Red Bull Racing", "stops": 1}]
+    assert rows == [
+        {"driver": "VER", "team": "Red Bull Racing", "team_colour": "#3671C6", "stops": 1}
+    ]
 
 
 # ---- session_pace ----
@@ -153,6 +163,7 @@ def test_session_pace_takes_best_lap_per_driver_per_session():
     rows = compute_session_pace(sessions, laps, DRIVERS)
     by_driver = {r["driver"]: r["best_lap_seconds"] for r in rows}
     assert by_driver == {"VER": 90.5, "PIA": 90.8}
+    assert next(r for r in rows if r["driver"] == "VER")["team_colour"] == "#3671C6"
 
 
 def test_session_pace_sorted_by_latest_session_first():
@@ -200,6 +211,9 @@ def test_conditions_uses_latest_reading():
     assert conditions["track_temperature"] == 35
     assert conditions["rain"] is True
     assert len(conditions["series"]) == 2
+    assert conditions["series"][0]["humidity"] == 50
+    assert conditions["series"][0]["wind_speed"] == 1.0
+    assert conditions["series"][0]["rainfall"] == 0
 
 
 def test_conditions_empty_when_no_weather_data():
@@ -219,6 +233,7 @@ def test_standings_computes_gap_to_leader_from_points():
     rows = compute_standings(standings, DRIVERS)
     assert rows[0]["gap_to_leader"] == 0
     assert rows[1]["gap_to_leader"] == 33.0
+    assert rows[0]["team_colour"] == "#3671C6"
 
 
 def test_standings_empty_when_no_data():
