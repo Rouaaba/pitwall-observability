@@ -183,6 +183,8 @@ class OpenF1Client:
         session: requests.Session | None = None,
         timeout_seconds: float = 30.0,
         sleep_fn: Callable[[float], None] = time.sleep,
+        on_response: Callable[[int], None] | None = None,
+        on_rate_limit_wait: Callable[[float], None] | None = None,
     ) -> None:
         self.base_url = base_url
         self.cache = ResponseCache(cache_dir or Path("data/.http_cache"))
@@ -191,6 +193,14 @@ class OpenF1Client:
         self.timeout_seconds = timeout_seconds
         self.sleep_fn = sleep_fn
         self.stats = RequestStats()
+        # Observability hooks, so a caller can emit pitwall_* metrics
+        # without the client needing to know about OTel. on_response is
+        # called with the HTTP status code on every real request attempt
+        # (not cache hits; 0 on a connection error/timeout).
+        # on_rate_limit_wait is called with the seconds waited, each time a
+        # request had to wait on the rate limiter.
+        self.on_response = on_response
+        self.on_rate_limit_wait = on_rate_limit_wait
 
     def get(self, endpoint: str, params: dict, *, permanent: bool = False) -> list:
         """Fetches one OpenF1 endpoint, honoring the cache rules above.
@@ -213,13 +223,20 @@ class OpenF1Client:
             if waited > 0:
                 self.stats.rate_limit_waits_total += 1
                 self.stats.rate_limit_wait_seconds_total += waited
+                if self.on_rate_limit_wait is not None:
+                    self.on_rate_limit_wait(waited)
 
             try:
                 resp = self.session.get(url, params=params, timeout=self.timeout_seconds)
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+                if self.on_response is not None:
+                    self.on_response(0)
                 last_error = exc
                 self._backoff_or_raise(attempt, endpoint, exc)
                 continue
+
+            if self.on_response is not None:
+                self.on_response(resp.status_code)
 
             if resp.status_code == 404:
                 return []

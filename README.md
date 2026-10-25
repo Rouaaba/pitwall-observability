@@ -18,8 +18,10 @@ Phase 3: dashboards, plus a restructure into a shared pipeline. `docker
 compose up` replays the cached 2023 Qatar GP and sends live metrics, logs
 and traces to Grafana Cloud; import the dashboards in
 [`dashboards/`](dashboards/) to watch it as a pit wall, a driver deep dive,
-and the pipeline's own self-observability. Briefing, Debrief, SLOs and
-alerting are still to come.
+and the pipeline's own self-observability. `python -m pipeline.briefing`
+generates precomputed Briefing snapshots from OpenF1 (see
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md)); the Briefing UI itself,
+Debrief, SLOs and alerting are still to come.
 
 ## Project layout
 

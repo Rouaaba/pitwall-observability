@@ -171,12 +171,13 @@ class FakeSession:
         return item
 
 
-def make_client(tmp_path, responses, sleep_calls=None):
+def make_client(tmp_path, responses, sleep_calls=None, on_response=None):
     session = FakeSession(responses)
     client = OpenF1Client(
         cache_dir=tmp_path,
         session=session,
         sleep_fn=(sleep_calls.append if sleep_calls is not None else lambda s: None),
+        on_response=on_response,
     )
     return client, session
 
@@ -262,3 +263,44 @@ def test_request_stats_start_at_zero(tmp_path):
     client = OpenF1Client(cache_dir=tmp_path)
     assert client.stats.rate_limit_waits_total == 0
     assert client.stats.retries_total == 0
+
+
+def test_on_response_hook_fires_with_status_code(tmp_path):
+    seen = []
+    client, session = make_client(
+        tmp_path, [FakeResponse(200, [{"lap": 1}])], on_response=seen.append
+    )
+    client.get("laps", {"session_key": 1}, permanent=True)
+    assert seen == [200]
+
+
+def test_on_response_hook_fires_for_each_retry_attempt(tmp_path):
+    seen = []
+    client, session = make_client(
+        tmp_path,
+        [FakeResponse(429), FakeResponse(200, [{"lap": 1}])],
+        on_response=seen.append,
+    )
+    client.get("laps", {"session_key": 1}, permanent=True)
+    assert seen == [429, 200]
+
+
+def test_on_response_hook_fires_with_zero_on_connection_error(tmp_path):
+    seen = []
+    client, session = make_client(
+        tmp_path,
+        [requests.exceptions.ConnectionError("refused"), FakeResponse(200, [{"lap": 1}])],
+        on_response=seen.append,
+    )
+    client.get("laps", {"session_key": 1}, permanent=True)
+    assert seen == [0, 200]
+
+
+def test_on_response_hook_not_called_on_cache_hit(tmp_path):
+    seen = []
+    client, session = make_client(
+        tmp_path, [FakeResponse(200, [{"lap": 1}])], on_response=seen.append
+    )
+    client.get("laps", {"session_key": 1}, permanent=True)
+    client.get("laps", {"session_key": 1}, permanent=True)  # cache hit
+    assert seen == [200]
