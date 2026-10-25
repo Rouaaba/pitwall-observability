@@ -20,11 +20,16 @@ def _to_ns(dt: datetime) -> int:
     return int(dt.timestamp() * 1_000_000_000)
 
 
-def build_tracer_provider(otlp_endpoint: str, session_key: int) -> TracerProvider:
+def build_tracer_provider(
+    otlp_endpoint: str, session_key: int, race_labels: dict[str, str]
+) -> TracerProvider:
     resource = Resource.create(
         {
             "service.name": "pitwall-replay",
             "pitwall.session_key": session_key,
+            "pitwall.season": race_labels["season"],
+            "pitwall.race": race_labels["race"],
+            "pitwall.session": race_labels["session"],
         }
     )
     exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)

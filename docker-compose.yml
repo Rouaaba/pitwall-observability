@@ -24,7 +24,9 @@ services:
       - .env
     environment:
       OTLP_ENDPOINT: alloy:4317
-      SESSION_KEY: "9221"
+      SEASON: "2023"
+      RACE: "Qatar"
+      SESSION_TYPE: "Race"
       SPEED: "1"
     volumes:
       - ./data:/app/data:ro

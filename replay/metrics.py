@@ -17,6 +17,11 @@ def build_meter_provider(
     export_interval_seconds: float,
     session_key: int,
 ) -> MeterProvider:
+    # Resource attributes are kept for logs/traces parity, but Grafana Cloud's
+    # OTLP-to-Prometheus path mostly surfaces these as target_info, not as
+    # labels on every series — so metrics must NOT rely on this for
+    # season/race/session; see PitwallMetrics, which attaches those as
+    # explicit per-call attributes instead.
     resource = Resource.create(
         {
             "service.name": "pitwall-replay",
@@ -35,7 +40,12 @@ def build_meter_provider(
 
 
 class PitwallMetrics:
-    def __init__(self, meter: Meter) -> None:
+    def __init__(self, meter: Meter, race_labels: dict[str, str]) -> None:
+        # Merged into every single metric call below (including replay
+        # self-observability and build_info), so season/race/session are
+        # never accidentally missing from a series.
+        self._race_labels = race_labels
+
         self._lap_time = meter.create_gauge(
             "pitwall_lap_time_seconds", unit="s", description="Last completed lap time"
         )
@@ -92,35 +102,40 @@ class PitwallMetrics:
             "pitwall_build_info", description="Replay build/run info, value is always 1"
         )
 
+    def _with_race_labels(self, attrs: dict) -> dict:
+        return {**attrs, **self._race_labels}
+
     def record_lap_time(self, attrs: dict, lap_time_s: float) -> None:
+        attrs = self._with_race_labels(attrs)
         self._lap_time.set(lap_time_s, attrs)
         self._lap_time_distribution.record(lap_time_s, attrs)
 
     def record_sector_time(self, attrs: dict, sector: int, duration_s: float) -> None:
-        self._sector_time.set(duration_s, {**attrs, "sector": str(sector)})
+        self._sector_time.set(duration_s, self._with_race_labels({**attrs, "sector": str(sector)}))
 
     def record_position(self, attrs: dict, position: int) -> None:
-        self._position.set(position, attrs)
+        self._position.set(position, self._with_race_labels(attrs))
 
     def record_gap_to_leader(self, attrs: dict, gap_s: float) -> None:
-        self._gap_to_leader.set(gap_s, attrs)
+        self._gap_to_leader.set(gap_s, self._with_race_labels(attrs))
 
     def record_interval(self, attrs: dict, interval_s: float) -> None:
-        self._interval.set(interval_s, attrs)
+        self._interval.set(interval_s, self._with_race_labels(attrs))
 
     def record_tyre_age(self, attrs: dict, compound: str, age_laps: int) -> None:
-        self._tyre_age.set(age_laps, {**attrs, "compound": compound})
+        self._tyre_age.set(age_laps, self._with_race_labels({**attrs, "compound": compound}))
 
     def record_pit_stop(self, attrs: dict) -> None:
-        self._pit_stops.add(1, attrs)
+        self._pit_stops.add(1, self._with_race_labels(attrs))
 
     def record_pit_duration(self, attrs: dict, duration_s: float) -> None:
-        self._pit_duration.set(duration_s, attrs)
+        self._pit_duration.set(duration_s, self._with_race_labels(attrs))
 
     def record_car_telemetry(
         self, attrs: dict, speed: float | None, throttle: float | None,
         brake: float | None, n_gear: int | None,
     ) -> None:
+        attrs = self._with_race_labels(attrs)
         if speed is not None:
             self._car_speed.set(speed, attrs)
         if throttle is not None:
@@ -131,24 +146,28 @@ class PitwallMetrics:
             self._car_gear.set(n_gear, attrs)
 
     def record_car_position(self, attrs: dict, x: float | None, y: float | None) -> None:
+        attrs = self._with_race_labels(attrs)
         if x is not None:
             self._car_x.set(x, attrs)
         if y is not None:
             self._car_y.set(y, attrs)
 
     def record_event_processed(self, kind: str) -> None:
-        self._replay_events_total.add(1, {"event_kind": kind})
+        self._replay_events_total.add(1, self._with_race_labels({"event_kind": kind}))
 
     def record_lag(self, lag_seconds: float) -> None:
-        self._replay_lag.set(lag_seconds)
+        self._replay_lag.set(lag_seconds, self._with_race_labels({}))
 
     def set_build_info(self, version: str, session_key: int, speed: int) -> None:
         self._build_info.set(
-            1, {"version": version, "session_key": str(session_key), "speed": str(speed)}
+            1,
+            self._with_race_labels(
+                {"version": version, "session_key": str(session_key), "speed": str(speed)}
+            ),
         )
 
 
-def create_metrics(provider: MeterProvider) -> PitwallMetrics:
+def create_metrics(provider: MeterProvider, race_labels: dict[str, str]) -> PitwallMetrics:
     metrics.set_meter_provider(provider)
     meter = provider.get_meter("pitwall.replay")
-    return PitwallMetrics(meter)
+    return PitwallMetrics(meter, race_labels)

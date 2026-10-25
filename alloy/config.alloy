@@ -24,3 +24,20 @@ otelcol.auth.basic "grafana_cloud" {
   username = sys.env("GRAFANA_INSTANCE_ID")
   password = sys.env("GRAFANA_OTLP_TOKEN")
 }
+
+// Alloy self-monitoring: scrape Alloy's own /metrics and route it through
+// the same OTLP exporter above, so otelcol_exporter_sent_*/send_failed_*
+// reach Grafana Cloud without a second credential.
+prometheus.exporter.self "alloy" { }
+
+prometheus.scrape "alloy_self" {
+  targets    = prometheus.exporter.self.alloy.targets
+  forward_to = [otelcol.receiver.prometheus.self_monitoring.receiver]
+  job_name   = "alloy"
+}
+
+otelcol.receiver.prometheus "self_monitoring" {
+  output {
+    metrics = [otelcol.exporter.otlphttp.grafana_cloud.input]
+  }
+}

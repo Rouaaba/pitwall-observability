@@ -30,11 +30,16 @@ def severity_for_race_control(flag: str | None, category: str | None) -> tuple[S
     return SeverityNumber.INFO, "INFO"
 
 
-def build_logger_provider(otlp_endpoint: str, session_key: int) -> LoggerProvider:
+def build_logger_provider(
+    otlp_endpoint: str, session_key: int, race_labels: dict[str, str]
+) -> LoggerProvider:
     resource = Resource.create(
         {
             "service.name": "pitwall-replay",
             "pitwall.session_key": session_key,
+            "pitwall.season": race_labels["season"],
+            "pitwall.race": race_labels["race"],
+            "pitwall.session": race_labels["session"],
         }
     )
     exporter = OTLPLogExporter(endpoint=otlp_endpoint, insecure=True)

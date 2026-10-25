@@ -71,9 +71,9 @@ docker compose up --build
 ```
 
 This starts Grafana Alloy and the replay engine, which streams the cached
-2023 Qatar GP (`session_key=9221`) at 1x speed and sends `pitwall_*` metrics
-over OTLP to Alloy, which forwards them to Grafana Cloud. Override the
-session or speed with environment variables:
+2023 Qatar GP (`SEASON=2023 RACE=Qatar SESSION_TYPE=Race`, the default) at
+1x speed and sends `pitwall_*` metrics over OTLP to Alloy, which forwards
+them to Grafana Cloud. Override the speed with an environment variable:
 
 ```
 SPEED=60 docker compose up --build
@@ -82,6 +82,44 @@ SPEED=60 docker compose up --build
 `--speed` accepts `1`, `5`, `10` or `60`. Every emitted metric is timestamped
 with the real wall-clock moment it's sent, so dashboards always show "now" —
 at higher speeds the whole race simply plays out faster in real time.
+
+### Choosing a race
+
+The replay is configurable by season, race and session type — not hardcoded
+to one session. Pick a race with flags or environment variables:
+
+```
+.venv/bin/python -m replay --season 2023 --race "Abu Dhabi" --session-type Qualifying --speed 10
+```
+
+```
+SEASON=2023 RACE="Abu Dhabi" SESSION_TYPE=Qualifying docker compose up --build
+```
+
+Season/race/session are matched against whatever's cached under `data/`
+(see [Setup](#setup) to fetch a new one first). If the race isn't cached,
+the replay fails fast and tells you exactly what *is* cached and the
+`fetch_openf1.py` command to download the one you asked for. You can also
+skip the lookup and target a cached session directly with
+`--session-key <key>` (e.g. `--session-key 9221`), which is what the
+project used exclusively before this became configurable.
+
+These three values become labels on every `pitwall_*` metric, named exactly
+`season`, `race` and `session` (matching Grafana dashboard variable names):
+
+| Label | Example | Shape |
+|---|---|---|
+| `season` | `2023` | string year |
+| `race` | `qatar`, `abu_dhabi` | lowercase, spaces/punctuation → `_` |
+| `session` | `R`, `Q`, `S`, `SQ`, `FP1`, `FP2`, `FP3` | short code |
+
+The same three values are also set as resource attributes
+(`pitwall.season`, `pitwall.race`, `pitwall.session`) on the logs and traces
+providers, for consistency — but dashboards filtering on metrics should use
+the per-metric labels above, not resource attributes. Grafana Cloud's
+OTLP-to-Prometheus path mostly surfaces resource attributes as `target_info`
+rather than as labels on every series, so relying on them for metric
+filtering would silently break.
 
 The replay also reports on itself: `pitwall_replay_events_total` (by event
 kind) and `pitwall_replay_lag_seconds` (how far behind schedule it is) are
@@ -131,8 +169,15 @@ yet in Terraform — that's Phase 4) and only needs doing once per stack.
 ### Running outside Docker
 
 ```
-.venv/bin/python -m replay --session-key 9221 --speed 1 --otlp-endpoint localhost:4317
+.venv/bin/python -m replay --season 2023 --race Qatar --session-type Race --speed 1 --otlp-endpoint localhost:4317
 ```
+
+### Alloy self-monitoring
+
+Alloy scrapes its own `/metrics` endpoint and routes the result through the
+same OTLP exporter used for the replay's own telemetry, so
+`otelcol_exporter_sent_*`/`otelcol_exporter_send_failed_*` reach Grafana
+Cloud without a second credential. These series carry `job="alloy"`.
 
 ## Tests and linting
 
