@@ -1,6 +1,6 @@
 """Fetches and caches raw OpenF1 data for one session, filtered by session_key.
 
-Usage: uv run python replay/fetch_openf1.py --year 2023 --meeting "Qatar"
+Usage: .venv/bin/python pipeline/fetch_openf1.py --year 2023 --meeting "Qatar"
 """
 
 import argparse

@@ -5,7 +5,7 @@ events_total, build_info) and were historically easy to miss."""
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
-from replay.metrics import PitwallMetrics
+from pipeline.metrics import PitwallMetrics
 
 RACE_LABELS = {"season": "2023", "race": "qatar", "session": "R"}
 

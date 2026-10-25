@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from replay.clock import ReplayClock
+from pipeline.clock import ReplayClock
 
 RACE_START = datetime(2023, 10, 8, 17, 0, 0, tzinfo=UTC)
 

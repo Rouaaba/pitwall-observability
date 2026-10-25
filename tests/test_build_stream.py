@@ -2,7 +2,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from replay.events import build_event_stream
+from pipeline.events import build_event_stream
 
 T0 = datetime(2023, 10, 8, 17, 0, 0, tzinfo=UTC)
 

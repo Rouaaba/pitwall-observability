@@ -1,4 +1,4 @@
-"""CLI entrypoint: `python -m replay --season 2023 --race Qatar --session Race --speed 1`."""
+"""CLI entrypoint: `python -m pipeline --season 2023 --race Qatar --session Race --speed 1`."""
 
 import argparse
 import logging

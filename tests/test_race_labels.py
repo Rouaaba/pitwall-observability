@@ -1,4 +1,4 @@
-from replay.race_labels import normalize_race, normalize_season, normalize_session, race_labels
+from pipeline.race_labels import normalize_race, normalize_season, normalize_session, race_labels
 
 
 def test_normalize_season_from_int():

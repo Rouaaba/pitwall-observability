@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from replay.events import EventKind, _events_from_records, _synthesize_stint_events
+from pipeline.events import EventKind, _events_from_records, _synthesize_stint_events
 
 T0 = datetime(2023, 10, 8, 17, 0, 0, tzinfo=UTC)
 

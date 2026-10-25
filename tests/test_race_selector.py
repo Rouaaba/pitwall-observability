@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from replay.race_selector import RaceNotFoundError, resolve_session_key
+from pipeline.race_selector import RaceNotFoundError, resolve_session_key
 
 
 def write_session(data_dir: Path, session_key: int, year: int, country: str, session_name: str) -> None:

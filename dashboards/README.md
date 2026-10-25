@@ -51,7 +51,7 @@ access to it:
   `driver-deep-dive.json` panel 4).
 - **`$session` dashboard variable**: deliberately not added. `session_key`
   is currently only a label on `pitwall_build_info`, not on per-event
-  metrics (`pitwall_lap_time_seconds` etc.) — see `replay/engine.py`'s
+  metrics (`pitwall_lap_time_seconds` etc.) — see `pipeline/engine.py`'s
   `_attrs()`. These dashboards assume a single session is being replayed
   at a time, which matches how the replay is actually run today. Loki and
   Tempo panels still carry `pitwall.session_key` as a resource

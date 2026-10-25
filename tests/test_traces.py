@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
 
-from replay.clock import ReplayClock
-from replay.engine import ReplayEngine
-from replay.events import Event, EventKind
+from pipeline.clock import ReplayClock
+from pipeline.engine import ReplayEngine
+from pipeline.events import Event, EventKind
 from tests.test_engine import RecordingLogs, RecordingMetrics, RecordingTraces
 
 T0 = datetime(2023, 10, 8, 17, 0, 0, tzinfo=UTC)

@@ -23,7 +23,7 @@ are still to come.
 
 ```
 pitwall-observability/
-├── replay/            # Python replay engine
+├── pipeline/           # Python ingestion pipeline (rehearsal + production use)
 ├── tests/              # pytest unit tests (clock, events, engine)
 ├── alloy/             # Alloy config
 ├── dashboards/        # dashboard JSON
@@ -61,7 +61,7 @@ pitwall-observability/
    .venv/bin/pip install -r requirements-dev.txt
    ```
 3. Fetch and cache race data (only needed once per session):
-   `.venv/bin/python replay/fetch_openf1.py --year 2023 --meeting Qatar`
+   `.venv/bin/python pipeline/fetch_openf1.py --year 2023 --meeting Qatar`
 4. Explore the data: `.venv/bin/jupyter lab notebooks/`
 
 ## Running the replay
@@ -89,11 +89,11 @@ The replay is configurable by season, race and session type — not hardcoded
 to one session. Pick a race with flags or environment variables:
 
 ```
-.venv/bin/python -m replay --season 2023 --race "Abu Dhabi" --session-type Qualifying --speed 10
+.venv/bin/python -m pipeline --season 2023 --race "United Arab Emirates" --session-type Qualifying --speed 10
 ```
 
 ```
-SEASON=2023 RACE="Abu Dhabi" SESSION_TYPE=Qualifying docker compose up --build
+SEASON=2023 RACE="United Arab Emirates" SESSION_TYPE=Qualifying docker compose up --build
 ```
 
 Season/race/session are matched against whatever's cached under `data/`
@@ -169,7 +169,7 @@ yet in Terraform — that's Phase 4) and only needs doing once per stack.
 ### Running outside Docker
 
 ```
-.venv/bin/python -m replay --season 2023 --race Qatar --session-type Race --speed 1 --otlp-endpoint localhost:4317
+.venv/bin/python -m pipeline --season 2023 --race Qatar --session-type Race --speed 1 --otlp-endpoint localhost:4317
 ```
 
 ### Alloy self-monitoring

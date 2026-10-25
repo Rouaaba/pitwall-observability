@@ -5,6 +5,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY replay/ ./replay/
+COPY pipeline/ ./pipeline/
 
-ENTRYPOINT ["python", "-m", "replay"]
+ENTRYPOINT ["python", "-m", "pipeline"]
