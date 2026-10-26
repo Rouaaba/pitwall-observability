@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from .briefing_fetch import MeetingData, YearData
 
-DEFAULT_FINAL_GRACE_PERIOD = timedelta(hours=24)
+DEFAULT_FINAL_GRACE_PERIOD = timedelta(hours=1)
 
 # e.g. "CAR 10 (GAS) TIME 1:36.764 DELETED - TRACK LIMITS AT TURN 9 LAP 3 16:07:14"
 _DELETED_LAP_RE = re.compile(

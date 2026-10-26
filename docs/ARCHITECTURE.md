@@ -169,7 +169,7 @@ Key behaviors, each covered by its own test file (`tests/test_briefing_*.py`,
 - **A snapshot is `final` only once it's truly safe to stop refreshing it**:
   all sessions ended, the race's own `session_result` is non-empty (OpenF1
   sometimes publishes final results with a delay), and a configurable grace
-  period (default 24h) has passed since the race ended. `final` snapshots
+  period (default 1h) has passed since the race ended. `final` snapshots
   are skipped on every later run unless `--force` is passed — this is what
   makes a scheduled run cheap (most runs touch only the current, not-yet-final
   meeting) and a backfill resumable (an interrupted backfill just skips

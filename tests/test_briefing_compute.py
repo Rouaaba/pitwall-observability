@@ -283,10 +283,10 @@ def test_final_requires_grace_period_elapsed():
     sessions = [
         {"session_name": "Race", "date_start": "2026-03-15T14:00:00+00:00", "date_end": "2026-03-15T16:00:00+00:00"},
     ]
-    just_after = datetime(2026, 3, 15, 17, 0, tzinfo=UTC)  # 1 hour after race end
+    just_after = datetime(2026, 3, 15, 16, 30, tzinfo=UTC)  # 30 min after race end
     assert compute_final(sessions, session_result=[{"position": 1}], now=just_after) is False
 
-    well_after = datetime(2026, 3, 16, 17, 0, tzinfo=UTC)  # 25 hours after race end
+    well_after = datetime(2026, 3, 15, 18, 0, tzinfo=UTC)  # 2 hours after race end
     assert compute_final(sessions, session_result=[{"position": 1}], now=well_after) is True
 
 
